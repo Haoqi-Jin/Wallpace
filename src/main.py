@@ -34,6 +34,8 @@ logging.basicConfig(
     ],
 )
 
+logger = logging.getLogger("main")
+
 
 def run_tests() -> None:
     """仅运行核心模块单元测试，退出前打印汇总。"""
@@ -51,6 +53,65 @@ def run_tests() -> None:
             f"{len(result.skipped)} 项"
         )
     sys.exit(0 if result.wasSuccessful() else 1)
+
+
+def _resolve_interval_minutes(settings, switch_mode: str):
+    """校验并修正启动时的 interval_minutes 配置。
+
+    历史缺陷（P0-2）：设置页切到「间隔时间」时给 switch_mode 做了持久化，
+    却没把兜底出来的 interval_minutes 写回配置，于是配置可能是
+    `{switch_mode: "interval_minutes", interval_minutes: null}`，下次启动
+    `Scheduler.start()` 直接抛 ValueError，打包成 --windowed 后表现为
+    "双击图标 → 无声退出"。这里在构造 Scheduler 之前统一修正并落盘。
+
+    Args:
+        settings: Settings 实例。
+        switch_mode: 配置中的切换模式。
+
+    Returns:
+        修正后的 interval_minutes（可能是 None，表示非间隔模式/保持原样）。
+    """
+    interval_minutes = settings.get("interval_minutes", None)
+    if switch_mode != "interval_minutes":
+        return interval_minutes
+    if (
+        isinstance(interval_minutes, bool)
+        or not isinstance(interval_minutes, int)
+        or interval_minutes <= 0
+    ):
+        logger.warning(
+            "配置的 interval_minutes 无效(%r)，已回退为 60", interval_minutes
+        )
+        interval_minutes = 60
+        try:
+            settings.set("interval_minutes", interval_minutes)
+        except Exception:
+            logger.exception("回写 interval_minutes 失败，仅本次启动生效")
+    return interval_minutes
+
+
+def start_scheduler(scheduler, on_switch) -> bool:
+    """启动调度器；任何 ValueError 都降级为手动模式，绝不阻止主窗口显示。
+
+    Args:
+        scheduler: Scheduler 实例。
+        on_switch: 切换完成后的回调。
+
+    Returns:
+        True 表示按原模式启动成功；False 表示已降级为手动模式。
+    """
+    try:
+        scheduler.start(on_switch=on_switch)
+        return True
+    except ValueError as exc:
+        logger.error("调度器启动失败，已降级为手动模式: %s", exc)
+        try:
+            scheduler.stop()
+            scheduler.mode = "manual"
+            scheduler.start(on_switch=on_switch)
+        except Exception:
+            logger.exception("降级为手动模式后仍无法启动调度器，忽略")
+        return False
 
 
 def main() -> None:
@@ -96,7 +157,9 @@ def main() -> None:
 
     switch_mode = settings.get("switch_mode", "daily_random")
     daily_time = settings.get("daily_time", "08:00")
-    interval_minutes = settings.get("interval_minutes", None)
+    # P0-2：进入间隔模式前先修正并持久化 interval_minutes，避免
+    # {switch_mode: "interval_minutes", interval_minutes: null} 导致启动崩溃
+    interval_minutes = _resolve_interval_minutes(settings, switch_mode)
 
     scheduler = Scheduler(
         mode=switch_mode,
@@ -136,8 +199,8 @@ def main() -> None:
     logger.info("当前壁纸: %s", wm.get_current_wallpaper())
     logger.info("切换模式: %s", scheduler.mode)
 
-    # 启动调度器
-    scheduler.start(on_switch=window.on_wallpaper_switched)
+    # 启动调度器（失败也不会阻止主窗口显示，见 start_scheduler）
+    start_scheduler(scheduler, window.on_wallpaper_switched)
     logger.info("调度器已启动 (mode=%s)", scheduler.mode)
 
     print("Wallpace 正在启动...")

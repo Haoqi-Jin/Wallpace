@@ -6,13 +6,22 @@
   - 恢复按钮（仅已跳过项显示）：从跳过列表中移除
 收藏与跳过变更通过 on_persist 回调写回配置，避免重启后丢失。
 
-缩略图解码走 src.app.image_loader 的全局异步加载（后台线程解码，信号回主线程），
-不在主线程同步解码，也不在非主线程操作任何 QWidget。
+缩略图解码走 src.app.image_loader 的按 path 订阅异步加载（后台线程解码，
+回调只发给订阅该 path 的对象），不在主线程同步解码，也不在非主线程操作
+任何 QWidget。
+
+性能（P0-3）
+------------
+早期实现在 refresh() 中为**全部**图片同步创建 _Tile（每个约 6 个 QObject），
+800 张图实测 7.8 秒主线程假死，且每次切到本页（showEvent）都完整重建。
+现改为：
+  1. 分页懒加载：首屏只创建 THUMB_BATCH 个，滚动接近底部时追加下一批；
+  2. refresh() 去重：数据签名（筛选 + 路径列表 + 收藏/跳过数量）未变则直接
+     返回，showEvent 每次切页不再无谓重建。
 """
 
 import logging
-from pathlib import Path
-from typing import Callable, List, Optional
+from typing import Callable, List, Optional, Tuple
 
 from PySide6.QtCore import Qt, QSize
 from PySide6.QtGui import QImage, QPixmap
@@ -32,6 +41,10 @@ logger = logging.getLogger(__name__)
 
 THUMB_SIZE = QSize(160, 120)
 GRID_COLS = 4
+
+# 分页懒加载：首屏一次性创建的 tile 数 + 距底部多少像素时预取下一批
+THUMB_BATCH = 50
+LOAD_AHEAD_PX = 320
 
 
 class _Tile(QWidget):
@@ -88,21 +101,24 @@ class _Tile(QWidget):
         vbox.addWidget(self._thumb)
         vbox.addLayout(btn_row)
 
-        # 异步解码（后台线程，完成后经信号回主线程）
-        self._conn = image_loader.connect_ready(self._on_image_ready)
-        image_loader.load_async(path, THUMB_SIZE)
+        # 按 path 订阅异步解码结果（后台线程解码，回调只发给本 tile）
+        image_loader.load_async(path, THUMB_SIZE, self._on_image_ready)
 
     def _on_image_ready(self, path: str, image: QImage) -> None:
         if path != self._path:
             return
-        pix = QPixmap.fromImage(image)
-        self._thumb.setPixmap(
-            pix.scaled(
-                THUMB_SIZE,
-                Qt.AspectRatioMode.KeepAspectRatio,
-                Qt.TransformationMode.SmoothTransformation,
+        try:
+            pix = QPixmap.fromImage(image)
+            self._thumb.setPixmap(
+                pix.scaled(
+                    THUMB_SIZE,
+                    Qt.AspectRatioMode.KeepAspectRatio,
+                    Qt.TransformationMode.SmoothTransformation,
+                )
             )
-        )
+        except RuntimeError:
+            # widget 已被销毁，忽略
+            pass
 
     def _toggle_fav(self) -> None:
         if self._library.is_favorite(self._path):
@@ -118,16 +134,13 @@ class _Tile(QWidget):
         # 当前已不在跳过列表，刷新页面以移除该卡片
         self._page.refresh()
 
-    def cleanup(self) -> None:
-        """断开全局解码信号连接，避免野回调。"""
-        try:
-            self._conn.disconnect()
-        except Exception:
-            pass
+    def unsubscribe(self) -> None:
+        """退订该 tile 的图片解码回调（销毁前调用，避免野回调）。"""
+        image_loader.cancel(self._path, self._on_image_ready)
 
 
 class GalleryPage(QWidget):
-    """图片库页面：全部 / 收藏 / 已跳过 筛选 + 缩略图网格。"""
+    """图片库页面：全部 / 收藏 / 已跳过 筛选 + 缩略图网格（分页懒加载）。"""
 
     def __init__(
         self,
@@ -143,6 +156,12 @@ class GalleryPage(QWidget):
         self._on_set_wallpaper = on_set_wallpaper
         self._on_persist = on_persist
         self._filter = "all"  # all | favorites | skipped
+
+        # --- 分页懒加载状态 ---
+        self._pending_paths: List[str] = []   # 尚未创建 tile 的图片路径
+        self._rendered_count: int = 0         # 已创建 tile 的数量（也是下一个网格下标）
+        self._signature: Optional[Tuple] = None  # 上次渲染的数据签名，用于去重
+
         self._build_ui()
 
     def _build_ui(self) -> None:
@@ -178,6 +197,11 @@ class GalleryPage(QWidget):
         self._scroll.setWidget(self._content)
         layout.addWidget(self._scroll, stretch=1)
 
+        # 滚动接近底部时追加下一批（懒加载）
+        vbar = self._scroll.verticalScrollBar()
+        vbar.valueChanged.connect(self._maybe_append_batch)
+        vbar.rangeChanged.connect(lambda _min, _max: self._maybe_append_batch())
+
         self._update_filter_buttons()
         self.refresh()
 
@@ -198,18 +222,63 @@ class GalleryPage(QWidget):
             return self._library.skip_list
         return self._library.list_available()
 
-    def refresh(self) -> None:
-        """根据当前筛选重建缩略图网格。"""
+    def _data_signature(self, paths: List[str]) -> Tuple:
+        """当前渲染数据的签名，用于判断"数据是否真的变了"。
+
+        包含收藏/跳过数量，因为切换「全部」筛选下的收藏状态时路径列表不变，
+        但 tile 上的 ★ 需要重绘。
+        """
+        return (
+            self._filter,
+            tuple(paths),
+            len(self._library.favorites),
+            len(self._library.skip_list),
+        )
+
+    def refresh(self, force: bool = False) -> None:
+        """根据当前筛选重建缩略图网格（首屏只建 THUMB_BATCH 个）。
+
+        Args:
+            force: True 时跳过数据签名比对，强制重建。
+        """
+        paths = self._current_paths()
+        signature = self._data_signature(paths)
+        if not force and signature == self._signature:
+            # 数据未变更，跳过重建（showEvent 每次切页都会调用 refresh）
+            return
+        self._signature = signature
+
+        self._clear_grid()
+
+        self._pending_paths = list(paths)
+        self._rendered_count = 0
+        self._append_batch()
+
+    def _clear_grid(self) -> None:
+        """清空网格：先从布局摘除 item，再退订 + deleteLater。
+
+        注意：必须用 takeAt 先把 item 从布局中移除再 deleteLater，否则
+        count() 不会减少（销毁要等事件循环），会死循环。
+        """
         while self._grid.count():
             item = self._grid.takeAt(0)
-            w = item.widget()
-            if w is not None:
-                if isinstance(w, _Tile):
-                    w.cleanup()
-                w.deleteLater()
+            if item is None:
+                break
+            widget = item.widget()
+            if widget is None:
+                continue
+            if isinstance(widget, _Tile):
+                widget.unsubscribe()
+            widget.setParent(None)
+            widget.deleteLater()
 
-        paths = self._current_paths()
-        for i, path in enumerate(paths):
+    def _append_batch(self) -> None:
+        """从待渲染队列取一批图片创建 tile（主线程）。"""
+        if not self._pending_paths:
+            return
+        batch = self._pending_paths[:THUMB_BATCH]
+        del self._pending_paths[: len(batch)]
+        for path in batch:
             tile = _Tile(
                 path,
                 self._library,
@@ -217,9 +286,34 @@ class GalleryPage(QWidget):
                 self._on_persist,
                 self,
             )
-            self._grid.addWidget(tile, i // GRID_COLS, i % GRID_COLS)
+            index = self._rendered_count
+            self._grid.addWidget(tile, index // GRID_COLS, index % GRID_COLS)
+            self._rendered_count += 1
+
+    def _maybe_append_batch(self, *args) -> None:  # noqa: ANN002
+        """滚动接近底部时追加下一批缩略图（懒加载）。"""
+        if not self._pending_paths:
+            return
+        vbar = self._scroll.verticalScrollBar()
+        if vbar.maximum() - vbar.value() <= LOAD_AHEAD_PX:
+            self._append_batch()
+
+    def load_all(self) -> None:
+        """立即创建剩余全部 tile（供测试/导出场景使用）。"""
+        while self._pending_paths:
+            self._append_batch()
+
+    @property
+    def rendered_count(self) -> int:
+        """当前已创建的 tile 数量。"""
+        return self._rendered_count
+
+    @property
+    def pending_count(self) -> int:
+        """尚未创建的 tile 数量。"""
+        return len(self._pending_paths)
 
     def showEvent(self, event) -> None:  # noqa: ANN001
-        # 切到该页时按最新 library 状态刷新
+        # 切到该页时按最新 library 状态刷新；数据未变则 refresh 内部直接返回
         self.refresh()
         super().showEvent(event)

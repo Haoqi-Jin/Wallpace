@@ -123,13 +123,11 @@ class _GalleryThumbWidget(QLabel):
         super().__init__(parent)
         self._image_path = image_path
         self._is_current = is_current
-        self._conn = None
         self.setFixedSize(80, 60)
         self.setCursor(Qt.CursorShape.PointingHandCursor)
         self._apply_style()
-        # 异步加载缩略图，解码完成回到主线程后更新
-        self._conn = image_loader.connect_ready(self._on_image_ready)
-        image_loader.load_async(image_path, self._THUMB_SIZE)
+        # 异步加载缩略图：按 path 订阅，解码完成只回调本 widget（无需 disconnect）
+        image_loader.load_async(image_path, self._THUMB_SIZE, self._on_image_ready)
 
     def _on_image_ready(self, path: str, image) -> None:
         """后台解码完成的回调（主线程执行）。只处理匹配当前 path 的图片。"""
@@ -137,19 +135,17 @@ class _GalleryThumbWidget(QLabel):
             return
         if image.isNull():
             return
-        scaled = QPixmap.fromImage(image).scaled(
-            80,
-            60,
-            Qt.AspectRatioMode.KeepAspectRatio,
-            Qt.TransformationMode.SmoothTransformation,
-        )
-        self.setPixmap(scaled)
-
-    def cleanup(self) -> None:
-        """widget 销毁时断开信号连接，避免回调引用已销毁对象。"""
-        if self._conn is not None:
-            self._conn.disconnect()
-            self._conn = None
+        try:
+            scaled = QPixmap.fromImage(image).scaled(
+                80,
+                60,
+                Qt.AspectRatioMode.KeepAspectRatio,
+                Qt.TransformationMode.SmoothTransformation,
+            )
+            self.setPixmap(scaled)
+        except RuntimeError:
+            # widget 已被销毁，忽略
+            pass
 
     def _apply_style(self) -> None:
         border_color = "#ec4899" if self._is_current else "#eeeeee"
@@ -704,13 +700,22 @@ class MainWindow(QMainWindow):
         # 如果是 interval_minutes 模式，从 settings 读取现有的间隔值
         if internal_mode == "interval_minutes":
             interval_val = self._settings.get("interval_minutes", 60)
-            if interval_val is None or interval_val <= 0:
+            if not isinstance(interval_val, int) or interval_val <= 0:
                 interval_val = 60
+            # 关键修复（P0-2）：兜底值必须写回配置。
+            # 早期实现只把兜底值给了 UI 和 scheduler，唯独没持久化，于是
+            # 配置变成 {switch_mode: "interval_minutes", interval_minutes: null}，
+            # 下次启动 main.py 构造 Scheduler(interval_minutes=None) →
+            # start() 抛 ValueError → 打包成 --windowed 后表现为"双击无反应退出"。
+            self._settings.set("interval_minutes", interval_val)
             # 将已有的间隔值显示到输入框
             self._settings_page.set_interval_value(interval_val)
-            # 如果调度器存在但 interval 值不同，更新调度器的间隔值
-            if self._scheduler and self._scheduler._interval_minutes != interval_val:
-                self._scheduler._interval_minutes = interval_val
+            # 同步调度器（走公开 setter，不再直写 _interval_minutes）
+            if self._scheduler is not None:
+                try:
+                    self._scheduler.set_interval_minutes(interval_val)
+                except ValueError as exc:
+                    logger.warning("同步间隔时间到调度器失败: %s", exc)
             self._settings_page.set_interval_visible(True)
         else:
             self._settings_page.set_interval_visible(False)
@@ -721,7 +726,13 @@ class MainWindow(QMainWindow):
                 self._scheduler.stop()
             self._scheduler.mode = internal_mode
             if internal_mode != "manual" and not self._scheduler.is_running:
-                self._scheduler.start(on_switch=self.on_wallpaper_switched)
+                # 兜底：任何调度器异常都不能让设置页交互中断（P0-2 同源防护）
+                try:
+                    self._scheduler.start(on_switch=self.on_wallpaper_switched)
+                except ValueError as exc:
+                    logger.error("调度器启动失败，已降级为手动模式: %s", exc)
+                    self._scheduler.mode = "manual"
+                    self._scheduler.start(on_switch=self.on_wallpaper_switched)
 
         self._settings_page.update_mode_description(internal_mode)
         self._settings_page.refresh()
@@ -738,13 +749,11 @@ class MainWindow(QMainWindow):
                 logger.warning("间隔时间必须为正数")
                 return
             self._settings.set("interval_minutes", interval_val)
-            if self._scheduler:
-                self._scheduler._interval_minutes = interval_val
-                # 如果当前是间隔模式且运行中，重启调度器以应用新间隔
-                mode = self._scheduler.mode
-                if mode == "interval_minutes" and self._scheduler.is_running:
-                    self._scheduler.stop()
-                    self._scheduler.start(on_switch=self.on_wallpaper_switched)
+            if self._scheduler is not None:
+                # 走公开 setter：间隔模式运行中会立即重建定时器；暂停态下
+                # 定时器本来就是停的，resume() 时会用新值重建（保持暂停语义，
+                # 不再像旧实现那样 stop/start 把暂停状态清掉）。
+                self._scheduler.set_interval_minutes(interval_val)
             logger.info("间隔时间已应用: %d 分钟", interval_val)
             self._update_info_cards()
             self.update_top_status()
@@ -973,14 +982,26 @@ class MainWindow(QMainWindow):
                 self.update_bottom_bar()
 
     def _refresh_gallery_thumbnails(self) -> None:
-        """重建缩略图区域：只立即加载首批，其余滚动到时懒加载。"""
-        # Clear existing widgets
-        for i in reversed(range(self._gallery_layout.count())):
-            widget = self._gallery_layout.itemAt(i).widget()
-            if widget is not None:
-                if isinstance(widget, _GalleryThumbWidget):
-                    widget.cleanup()
-                widget.deleteLater()
+        """重建缩略图区域：只立即加载首批，其余滚动到时懒加载。
+
+        清理旧 widget 时先用 takeAt 把 item 从布局中摘除，再 cancel 订阅 +
+        deleteLater。早期实现在这里调用 `widget.cleanup()`（内部用
+        `QMetaObject.Connection.disconnect()`），而本机 PySide6 的 Connection
+        没有该方法，会在第一个 widget 处抛 AttributeError，导致本方法整体中断、
+        后续 `gallery.refresh()` / 信息卡 / 底栏刷新全部被跳过（P0-1）。
+        现在退订走 image_loader.cancel()，不再依赖 disconnect()。
+        """
+        while self._gallery_layout.count():
+            item = self._gallery_layout.takeAt(0)
+            if item is None:
+                break
+            widget = item.widget()
+            if widget is None:
+                continue
+            if isinstance(widget, _GalleryThumbWidget):
+                image_loader.cancel(widget._image_path, widget._on_image_ready)
+            widget.setParent(None)
+            widget.deleteLater()
 
         images = self._library.list_available()
         self._gallery_pending = list(images)

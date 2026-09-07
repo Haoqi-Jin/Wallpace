@@ -32,10 +32,14 @@ VALID_SWITCH_MODES = ("daily_random", "interval_minutes", "manual")
 APP_DIR = Path.home() / ".wallpace"
 DEFAULT_CONFIG_PATH = APP_DIR / "config.json"
 
-# 旧版本默认配置位置（CWD / 项目根下的 .wallspace.json），用于首次启动时的平滑迁移。
+# 旧版本默认配置位置（CWD / 项目根下的遗留 json），用于首次启动时的平滑迁移。
+# 注意：历史上有两种拼写 —— 错误的 `.wallspace.json` 与正确的 `.wallpace.json`。
+# 早期只列了错误拼写，导致存了正确拼写文件的用户配置读不到（P0-4 附带问题）。
 # 仅在使用默认路径（未显式指定 config_path）时才检查这些位置，避免污染测试隔离。
 LEGACY_CONFIG_PATHS = [
+    Path.cwd() / ".wallpace.json",
     Path.cwd() / ".wallspace.json",
+    Path(__file__).resolve().parent.parent / ".wallpace.json",
     Path(__file__).resolve().parent.parent / ".wallspace.json",
 ]
 
@@ -45,8 +49,8 @@ class Settings:
 
     管理配置文件的读写，支持热加载和验证。
     首次运行时无配置文件会自动生成默认配置；使用默认路径且新位置不存在时，
-    会尝试从旧位置（CWD / 项目根下的 .wallspace.json）平滑迁移，保证用户既有
-    配置（尤其是 image_directories）不丢失。
+    会尝试从旧位置（CWD / 项目根下的 .wallpace.json / .wallspace.json）
+    平滑迁移，保证用户既有配置（尤其是 image_directories）不丢失。
     """
 
     def __init__(self, config_path: Optional[Path] = None) -> None:
@@ -67,7 +71,8 @@ class Settings:
         """加载配置文件，不存在则回退到默认值。
 
         若使用默认路径且默认配置文件尚不存在，会尝试从旧位置
-        （CWD / 项目根下的 .wallspace.json）平滑迁移，以保证用户既有配置不丢失。
+        （CWD / 项目根下的 .wallpace.json / .wallspace.json）平滑迁移，
+        以保证用户既有配置不丢失。
 
         Returns:
             当前配置的字典。

@@ -174,6 +174,38 @@ class Scheduler:
         """返回当前设置的间隔分钟数（仅 interval 模式有意义）。"""
         return self._interval_minutes
 
+    def set_interval_minutes(self, minutes: Optional[int]) -> None:
+        """更新间隔分钟数；若正在以间隔模式运行，则重建定时器立即生效。
+
+        此前 UI 层只能直写 `scheduler._interval_minutes`（绕过定时器重建），
+        导致"改了值但定时器没变"与"stop/start 后才生效"两条路径行为不一致。
+        这里统一为唯一入口。
+
+        Args:
+            minutes: 间隔分钟数，必须为正整数。
+
+        Raises:
+            ValueError: minutes 不是正整数时抛出。
+        """
+        if (
+            isinstance(minutes, bool)
+            or not isinstance(minutes, int)
+            or minutes <= 0
+        ):
+            raise ValueError(f"interval_minutes 必须 > 0，收到 {minutes!r}")
+        changed = self._interval_minutes != minutes
+        self._interval_minutes = minutes
+        if changed:
+            logger.info("间隔时间更新为 %d 分钟", minutes)
+        if (
+            changed
+            and self._is_running
+            and not self._is_paused
+            and self._mode == self.SWITCH_MODE_INTERVAL
+        ):
+            # 重建定时器，让新间隔立即生效
+            self._start_interval_timer()
+
     # ==================== 私有方法 ====================
 
     def _parse_time(self, time_str: str) -> "dt_time":

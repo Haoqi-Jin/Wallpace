@@ -236,6 +236,113 @@ class TestMainWindowScheduler:
         assert main_window._scheduler.is_running
 
 
+class TestP0Regressions:
+    """P0 缺陷回归测试（修复后新增，防止回退）。"""
+
+    def test_second_thumbnail_rebuild_does_not_raise(self, main_window, tmp_path):
+        """P0-1：第二次重建缩略图条不得抛异常，也不得无限膨胀。
+
+        修复前 _refresh_gallery_thumbnails() 里的 widget.cleanup() 会因
+        QMetaObject.Connection 没有 disconnect() 而抛 AttributeError，
+        导致本方法整体中断（旧缩略图不移除 + 后续刷新全被跳过）。
+        """
+        from PySide6.QtGui import QImageWriter
+
+        for i in range(3):
+            img = QImage(100, 100, QImage.Format_RGB32)
+            img.fill(i * 50)
+            QImageWriter.write(img, str(tmp_path / f"p0_{i}.jpg"), "JPG")
+
+        main_window._library.add_directory(str(tmp_path))
+        main_window._refresh_gallery()
+        _wait_for_scan(main_window)
+        first_count = main_window._gallery_layout.count()
+
+        # 第二次重建：修复前这里会抛 AttributeError（被 _on_scan_finished 吞掉）
+        main_window._refresh_gallery()
+        _wait_for_scan(main_window)
+
+        assert main_window._gallery_layout.count() == first_count
+        assert first_count > 0
+
+    def test_repeated_rebuild_keeps_widget_count_stable(
+        self, main_window, tmp_path
+    ):
+        """P0-1：连续多次重建后缩略图数量保持稳定（修复前会持续累加）。"""
+        from PySide6.QtGui import QImageWriter
+
+        for i in range(12):
+            img = QImage(100, 100, QImage.Format_RGB32)
+            img.fill(i * 20)
+            QImageWriter.write(img, str(tmp_path / f"stable_{i}.jpg"), "JPG")
+
+        main_window._library.add_directory(str(tmp_path))
+        main_window._refresh_gallery()
+        _wait_for_scan(main_window)
+        baseline = main_window._gallery_layout.count()
+
+        for _ in range(3):
+            main_window._refresh_gallery_thumbnails()
+            QApplication.processEvents()
+
+        assert main_window._gallery_layout.count() == baseline
+
+    def test_mode_switch_persists_interval_minutes(self, main_window):
+        """P0-2：切到「间隔时间」后 interval_minutes 必须被持久化。
+
+        修复前兜底出的 60 只给了 UI 和 scheduler，配置里仍是 null，
+        下次启动 Scheduler.start() 抛 ValueError → 打包后无声退出。
+        """
+        _wait_for_scan(main_window)  # 扫描进行中 _on_mode_changed 会直接 return
+        main_window._settings.set("interval_minutes", None)
+        main_window._on_mode_changed("间隔时间")
+
+        assert main_window._settings.get("switch_mode") == "interval_minutes"
+        assert main_window._settings.get("interval_minutes") == 60
+
+    def test_restart_with_persisted_interval_does_not_crash(
+        self, main_window, tmp_path
+    ):
+        """P0-2 端到端：按持久化配置重建 Scheduler 并 start() 不得抛异常。"""
+        _wait_for_scan(main_window)
+        main_window._settings.set("interval_minutes", None)
+        main_window._on_mode_changed("间隔时间")
+
+        # 模拟下次启动：完全按配置重建 Scheduler
+        from src.core.scheduler import Scheduler
+
+        restarted = Scheduler(
+            mode=main_window._settings.get("switch_mode", "daily_random"),
+            daily_time=main_window._settings.get("daily_time", "08:00"),
+            interval_minutes=main_window._settings.get("interval_minutes", None),
+        )
+        restarted.set_dependencies(main_window._library, main_window._wallpaper_manager)
+        restarted.start(on_switch=lambda _p: None)  # 修复前这里抛 ValueError
+        assert restarted.is_running
+        restarted.stop()
+
+    def test_mode_switch_with_invalid_interval_degrades_to_manual(
+        self, main_window
+    ):
+        """P0-2 兜底：即便调度器启动失败，也不得让模式切换流程中断。"""
+        from src.core.scheduler import Scheduler
+
+        broken = Scheduler(mode="manual")
+        broken.set_dependencies(
+            main_window._library, main_window._wallpaper_manager
+        )
+        main_window._scheduler = broken
+
+        _wait_for_scan(main_window)
+        main_window._settings.set("interval_minutes", None)
+        main_window._on_mode_changed("间隔时间")
+
+        # 兜底值已落盘，调度器处于可用状态
+        assert main_window._settings.get("interval_minutes") == 60
+        assert main_window._scheduler.mode == "interval_minutes"
+        main_window._scheduler.stop()
+
+
 class TestMainWindowCloseBehavior:
     """关闭窗口行为：最小化到托盘 vs 真正退出。
 

@@ -130,3 +130,47 @@ class TestSettingsCorruptedFile:
         config_path.write_text("{not valid json!!!")
         s = Settings(config_path=config_path)
         assert s.get("switch_mode") == "daily_random"
+
+
+class TestLegacyMigrationPaths:
+    """P0-4 附带修复：迁移路径必须同时覆盖两种历史拼写。
+
+    早期 LEGACY_CONFIG_PATHS 只列了错误拼写 `.wallspace.json`，
+    存了正确拼写 `.wallpace.json` 的用户配置读不到。
+    """
+
+    @staticmethod
+    def _module():
+        """返回 Settings 实际所属模块对象。
+
+        测试文件以 `core.settings` 风格导入，而运行时可能是 `src.core.settings`，
+        两者在 sys.modules 中是不同对象，必须取 Settings.__module__ 才改得准。
+        """
+        import sys
+
+        return sys.modules[Settings.__module__]
+
+    def test_both_spellings_are_registered(self):
+        mod = self._module()
+        names = {p.name for p in mod.LEGACY_CONFIG_PATHS}
+        assert ".wallpace.json" in names
+        assert ".wallspace.json" in names
+
+    def test_migration_reads_correct_spelling(self, tmp_path, monkeypatch):
+        mod = self._module()
+
+        target = tmp_path / "new" / "config.json"
+        legacy = tmp_path / ".wallpace.json"
+        legacy.write_text(
+            '{"image_directories": ["D:/pics"], "switch_mode": "manual"}',
+            encoding="utf-8",
+        )
+        monkeypatch.setattr(mod, "LEGACY_CONFIG_PATHS", [legacy])
+
+        s = Settings.__new__(Settings)
+        s._using_default = True
+        s.config_path = target
+        s._data = {}
+        assert s._try_migrate() is True
+        assert s.get("image_directories") == ["D:/pics"]
+        assert s.get("switch_mode") == "manual"

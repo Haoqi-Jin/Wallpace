@@ -7,7 +7,6 @@ import tempfile
 from pathlib import Path
 
 import pytest
-from PySide6.QtCore import QMetaObject
 from PySide6.QtGui import QImage, QImageWriter
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -35,11 +34,11 @@ def _compat_qimagewriter_write(image: QImage, file_name, format_name=None):
 
 QImageWriter.write = _compat_qimagewriter_write
 
-if not hasattr(QMetaObject.Connection, "disconnect"):
-    def _disconnect(self):
-        return None
-
-    QMetaObject.Connection.disconnect = _disconnect
+# 注意：此处曾给 QMetaObject.Connection 打过一个返回 None 的 no-op
+# `disconnect()` 补丁。它让 110 个用例在生产环境行为不同的前提下全部通过，
+# 掩盖了 `_GalleryThumbWidget.cleanup()` 在生产环境抛 AttributeError 的 P0 缺陷。
+# 现在 image_loader 已改为"按 path 订阅 + cancel() 退订"，代码中不再调用
+# Connection.disconnect()，该补丁已移除，测试恢复反映真实行为。
 
 
 @pytest.fixture()

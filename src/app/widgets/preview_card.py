@@ -40,7 +40,6 @@ class PreviewCardWidget(QWidget):
         self._current_path: str = ""
         self._current_index: int = 0
         self._total_count: int = 0
-        self._conn = image_loader.connect_ready(self._on_image_ready)
         self._setup_ui()
         self._set_placeholder()
 
@@ -197,9 +196,9 @@ class PreviewCardWidget(QWidget):
         self.path_label.setText(str(Path(image_path).parent))
         self.index_label.setText(f"{index + 1} / {total}")
 
-        # 显示等待占位，随后异步解码大图
+        # 显示等待占位，随后按 path 订阅异步解码结果（无需 connect/disconnect）
         self._set_loading()
-        image_loader.load_async(image_path, QSize(900, 600))
+        image_loader.load_async(image_path, QSize(900, 600), self._on_image_ready)
 
     # ===== 异步解码回调 =====
 
@@ -207,22 +206,26 @@ class PreviewCardWidget(QWidget):
         """后台解码完成后的回调（主线程执行），只处理当前预览图。"""
         if path != self._current_path:
             return
-        if image.isNull():
-            self._set_placeholder()
-            return
-        scaled = QPixmap.fromImage(image).scaled(
-            480, 300,
-            Qt.AspectRatioMode.KeepAspectRatio,
-            Qt.TransformationMode.SmoothTransformation,
-        )
-        self.preview_label.setPixmap(scaled)
-        self.preview_label.setStyleSheet(
-            f"QLabel#preview-image {{ "
-            f"border: 3px solid {COLOR_GRAY_200}; "
-            f"border-radius: 12px; "
-            f"background-color: transparent; "
-            f"}}"
-        )
+        try:
+            if image.isNull():
+                self._set_placeholder()
+                return
+            scaled = QPixmap.fromImage(image).scaled(
+                480, 300,
+                Qt.AspectRatioMode.KeepAspectRatio,
+                Qt.TransformationMode.SmoothTransformation,
+            )
+            self.preview_label.setPixmap(scaled)
+            self.preview_label.setStyleSheet(
+                f"QLabel#preview-image {{ "
+                f"border: 3px solid {COLOR_GRAY_200}; "
+                f"border-radius: 12px; "
+                f"background-color: transparent; "
+                f"}}"
+            )
+        except RuntimeError:
+            # widget 已被销毁，忽略
+            pass
 
     def _set_loading(self) -> None:
         """显示加载中的占位提示。"""
@@ -246,9 +249,3 @@ class PreviewCardWidget(QWidget):
         self.index_label.setText("")
         self.preview_label.clear()
         self._set_placeholder()
-
-    def cleanup(self) -> None:
-        """widget 销毁时断开图片加载信号连接。"""
-        if self._conn is not None:
-            self._conn.disconnect()
-            self._conn = None
