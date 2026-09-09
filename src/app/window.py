@@ -43,6 +43,7 @@ if TYPE_CHECKING:
     from src.core.wallpaper_manager import WallpaperManager
 
 from src.app.sidebar import SidebarNavigation
+from src.core.directory_watcher import DirectoryWatcher
 from src.app.theme import (
     COLOR_BLUE_DARK,
     COLOR_GRAY_100,
@@ -225,6 +226,14 @@ class MainWindow(QMainWindow):
         # --- 缩略图懒加载状态 ---
         self._gallery_pending: list = []  # 尚未创建 widget 的图片路径
         self._gallery_items: list = []    # 已加载（已创建 widget）的图片路径
+
+        # --- 文件夹变更监听（watchdog 递归监听 + 防抖后触发重扫） ---
+        self._watcher = DirectoryWatcher(
+            extensions=self._settings.get("extensions", []),
+            parent=self,
+        )
+        self._watcher.changes_detected.connect(self._on_dirs_changed)
+        self._watcher.set_directories(self._settings.get("image_directories", []))
 
         self._setup_window()
         self._setup_ui()
@@ -677,6 +686,9 @@ class MainWindow(QMainWindow):
             if self._library.add_directory(folder, scan=False):
                 self._refresh_gallery()
                 self._settings_page.refresh()
+                self._watcher.set_directories(
+                    self._settings.get("image_directories", [])
+                )
                 logger.info("已添加图片目录: %s", folder)
             else:
                 logger.warning("添加图片目录失败（目录无效）: %s", folder)
@@ -773,6 +785,7 @@ class MainWindow(QMainWindow):
         self._library.remove_directory(removed, scan=False)
         self._refresh_gallery()
         self._settings_page.refresh()
+        self._watcher.set_directories(self._settings.get("image_directories", []))
         logger.info("已移除图片目录: %s", removed)
 
     def _remove_single_dir(self, path: str) -> None:
@@ -794,6 +807,9 @@ class MainWindow(QMainWindow):
                 self._library.remove_directory(path, scan=False)
                 self._refresh_gallery()
                 self._settings_page.refresh()
+                self._watcher.set_directories(
+                    self._settings.get("image_directories", [])
+                )
                 logger.info("已移除图片目录: %s", path)
 
     # ===== 业务操作 =====
@@ -932,6 +948,16 @@ class MainWindow(QMainWindow):
         self._scan_running = True
         self._set_scan_ui_state(True)
         self._scan_pool.start(_ScanJob(self._library, self._scan_signals))
+
+    def _on_dirs_changed(self) -> None:
+        """监听的图片文件夹内容发生变化 → 触发一次后台重扫。
+
+        防抖已在 DirectoryWatcher 内部处理（1.5s 内的多次事件合并为一次），
+        这里复用与手动扫描相同的 _start_async_scan 守卫（_scan_running /
+        _scan_pending），不会绕过防重入状态机。
+        """
+        logger.info("检测到图片文件夹变化，自动重新扫描")
+        self._start_async_scan()
 
     @Slot(list)
     def _on_scan_finished(self, images: list) -> None:
@@ -1157,9 +1183,12 @@ class MainWindow(QMainWindow):
                 self._tray.setVisible(True)
             return
 
-        # 真正退出：停调度器、隐藏并删除托盘
+        # 真正退出：停调度器、停文件夹监听、隐藏并删除托盘
         if hasattr(self, "_scheduler") and self._scheduler is not None:
             self._scheduler.stop()
+        if hasattr(self, "_watcher") and self._watcher is not None:
+            # 停止 watchdog Observer 并 join，避免后台线程导致进程无法退出
+            self._watcher.stop()
         if hasattr(self, "_tray") and self._tray is not None:
             self._tray.setVisible(False)
             self._tray.deleteLater()

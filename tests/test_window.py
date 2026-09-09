@@ -343,6 +343,65 @@ class TestP0Regressions:
         main_window._scheduler.stop()
 
 
+class TestDirectoryWatcherWiring:
+    """文件夹监听（DirectoryWatcher）在 MainWindow 里的接线。"""
+
+    def test_watcher_is_constructed(self, main_window):
+        assert hasattr(main_window, "_watcher")
+        assert main_window._watcher is not None
+
+    def test_on_dirs_changed_triggers_async_scan(self, main_window, monkeypatch):
+        calls = []
+        monkeypatch.setattr(main_window, "_start_async_scan", lambda: calls.append(1))
+        main_window._on_dirs_changed()
+        assert calls == [1]
+
+    def test_on_dirs_changed_respects_scan_guard(self, main_window):
+        """扫描进行中时 watcher 触发应合并为一次补扫，而非并发扫描。"""
+        main_window._scan_running = True
+        main_window._scan_pending = False
+        try:
+            main_window._on_dirs_changed()
+            assert main_window._scan_pending is True
+        finally:
+            main_window._scan_running = False
+            main_window._scan_pending = False
+
+    def test_add_directory_syncs_watcher(self, main_window, tmp_path, monkeypatch):
+        _wait_for_scan(main_window)
+        monkeypatch.setattr(
+            "src.app.window.QFileDialog.getExistingDirectory",
+            lambda *args, **kwargs: str(tmp_path),
+        )
+        recorded = []
+        monkeypatch.setattr(
+            main_window._watcher,
+            "set_directories",
+            lambda dirs: recorded.append(list(dirs)),
+        )
+        main_window._add_directory()
+        assert recorded
+        assert str(tmp_path) in recorded[-1]
+
+    def test_remove_single_dir_syncs_watcher(self, main_window, tmp_path, monkeypatch):
+        _wait_for_scan(main_window)
+        main_window._settings.set("image_directories", [str(tmp_path)])
+        main_window._library.add_directory(str(tmp_path))
+        monkeypatch.setattr(
+            "PySide6.QtWidgets.QMessageBox.question",
+            lambda *a, **k: 16384,  # StandardButton.Yes
+        )
+        recorded = []
+        monkeypatch.setattr(
+            main_window._watcher,
+            "set_directories",
+            lambda dirs: recorded.append(list(dirs)),
+        )
+        main_window._remove_single_dir(str(tmp_path))
+        assert recorded
+        assert str(tmp_path) not in recorded[-1]
+
+
 class TestMainWindowCloseBehavior:
     """关闭窗口行为：最小化到托盘 vs 真正退出。
 
