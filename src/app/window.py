@@ -12,12 +12,10 @@ from typing import TYPE_CHECKING, Optional
 
 from PySide6.QtCore import (
     Qt,
-    QSize,
-    Signal,
     Slot,
     QTimer,
 )
-from PySide6.QtGui import QIcon, QPixmap
+from PySide6.QtGui import QIcon
 from PySide6.QtWidgets import (
     QCheckBox,
     QComboBox,
@@ -28,7 +26,6 @@ from PySide6.QtWidgets import (
     QLabel,
     QMainWindow,
     QPushButton,
-    QScrollArea,
     QStackedWidget,
     QVBoxLayout,
     QWidget,
@@ -57,77 +54,12 @@ from src.app.widgets.preview_card import PreviewCardWidget
 from src.app.icon import create_app_icon
 from src.app import image_loader
 from src.app.scan_controller import ScanController
+from src.app.widgets.gallery_strip import GalleryStrip
 from src.core.autostart_registry import AutostartManager
 from src.app.pages.gallery_page import GalleryPage
 from src.app.pages.settings_page import SettingsPage
 
 logger = logging.getLogger(__name__)
-
-
-# ---------------------------------------------------------------------------
-# Internal helper: clickable gallery thumbnail widget
-# ---------------------------------------------------------------------------
-
-
-class _GalleryThumbWidget(QLabel):
-    """可点击的图片库缩略图，支持高亮当前选中项。
-
-    缩略图通过 image_loader 在后台线程解码，避免在主线程加载 4K 大图造成卡顿。
-    """
-
-    clicked = Signal(str)  # emits image path on click
-    _THUMB_SIZE = QSize(200, 160)
-
-    def __init__(
-        self,
-        image_path: str,
-        is_current: bool = False,
-        parent: Optional[QWidget] = None,
-    ) -> None:
-        super().__init__(parent)
-        self._image_path = image_path
-        self._is_current = is_current
-        self.setFixedSize(80, 60)
-        self.setCursor(Qt.CursorShape.PointingHandCursor)
-        self._apply_style()
-        # 异步加载缩略图：按 path 订阅，解码完成只回调本 widget（无需 disconnect）
-        image_loader.load_async(image_path, self._THUMB_SIZE, self._on_image_ready)
-
-    def _on_image_ready(self, path: str, image) -> None:
-        """后台解码完成的回调（主线程执行）。只处理匹配当前 path 的图片。"""
-        if path != self._image_path:
-            return
-        if image.isNull():
-            return
-        try:
-            scaled = QPixmap.fromImage(image).scaled(
-                80,
-                60,
-                Qt.AspectRatioMode.KeepAspectRatio,
-                Qt.TransformationMode.SmoothTransformation,
-            )
-            self.setPixmap(scaled)
-        except RuntimeError:
-            # widget 已被销毁，忽略
-            pass
-
-    def _apply_style(self) -> None:
-        border_color = "#ec4899" if self._is_current else "#eeeeee"
-        self.setStyleSheet(
-            "QLabel { "
-            f"border-radius: 6px; background-color: #f5f5f5; "
-            f"border: 2px solid {border_color}; "
-            "}"
-        )
-
-    def set_is_current(self, current: bool) -> None:
-        self._is_current = current
-        self._apply_style()
-
-    def mousePressEvent(self, event) -> None:  # noqa: ANN001
-        if event.button() == Qt.MouseButton.LeftButton:
-            self.clicked.emit(self._image_path)
-        super().mousePressEvent(event)
 
 
 class MainWindow(QMainWindow):
@@ -148,10 +80,6 @@ class MainWindow(QMainWindow):
 
     SWITCH_REQUESTED = 1
     FAVORITE_REQUESTED = 2
-
-    # 缩略图懒加载参数：首批加载数量 + 距右端多少像素时预取下一批
-    GALLERY_THUMB_BATCH = 10
-    GALLERY_LOAD_AHEAD_PX = 240
 
     def __init__(
         self,
@@ -192,10 +120,6 @@ class MainWindow(QMainWindow):
         self._scan = ScanController(self._library, self)
         self._scan.started.connect(self._on_scan_started)
         self._scan.finished.connect(self._on_scan_finished)
-
-        # --- 缩略图懒加载状态 ---
-        self._gallery_pending: list = []  # 尚未创建 widget 的图片路径
-        self._gallery_items: list = []    # 已加载（已创建 widget）的图片路径
 
         # --- 文件夹变更监听（watchdog 递归监听 + 防抖后触发重扫） ---
         self._watcher = DirectoryWatcher(
@@ -469,29 +393,22 @@ class MainWindow(QMainWindow):
         gallery_title.setObjectName("subtitle")
         gallery_layout.addWidget(gallery_title)
 
-        # Horizontal scroll area for thumbnails
-        self._gallery_scroll = QScrollArea()
-        self._gallery_scroll.setFixedHeight(100)
-        self._gallery_scroll.setHorizontalScrollBarPolicy(
-            Qt.ScrollBarPolicy.ScrollBarAlwaysOff
-        )
-        self._gallery_scroll.setWidgetResizable(True)
-        self._gallery_content = QWidget()
-        self._gallery_layout = QHBoxLayout(self._gallery_content)
-        self._gallery_layout.setContentsMargins(0, 0, 0, 0)
-        self._gallery_layout.setSpacing(8)
-        self._gallery_scroll.setWidget(self._gallery_content)
-        # 懒加载：滚动接近右端（或内容区范围变化）时按需追加下一批缩略图
-        hbar = self._gallery_scroll.horizontalScrollBar()
-        hbar.valueChanged.connect(self._maybe_load_more_thumbnails)
-        hbar.rangeChanged.connect(
-            lambda _min, _max: self._maybe_load_more_thumbnails()
-        )
-        gallery_layout.addWidget(self._gallery_scroll)
+        # 横向缩略图条（#1：滚动区 + 懒加载状态机已提取到 GalleryStrip）
+        self._gallery_strip = GalleryStrip(on_select=self._on_gallery_click)
+        gallery_layout.addWidget(self._gallery_strip)
 
         layout.addWidget(gallery_section)
 
         return page
+
+    @property
+    def _gallery_layout(self):
+        """图片库缩略图内部布局（facade → ``GalleryStrip`` 内部 QHBoxLayout）。
+
+        既有测试用 ``_gallery_layout.count()`` 断言缩略图数量，故保持同名 property，
+        直返 strip 内部布局（不复制），语义与搬迁前一致。
+        """
+        return self._gallery_strip.layout()
 
     def _make_info_card(self, label: str, value: str, highlight: bool = False) -> QFrame:
         card = QFrame()
@@ -1161,58 +1078,19 @@ class MainWindow(QMainWindow):
                 self.update_bottom_bar()
 
     def _refresh_gallery_thumbnails(self) -> None:
-        """重建缩略图区域：只立即加载首批，其余滚动到时懒加载。
+        """重建横向缩略图条（委托 ``GalleryStrip.reload``）。
 
-        清理旧 widget 时先用 takeAt 把 item 从布局中摘除，再 cancel 订阅 +
-        deleteLater。早期实现在这里调用 `widget.cleanup()`（内部用
-        `QMetaObject.Connection.disconnect()`），而本机 PySide6 的 Connection
-        没有该方法，会在第一个 widget 处抛 AttributeError，导致本方法整体中断、
-        后续 `gallery.refresh()` / 信息卡 / 底栏刷新全部被跳过（P0-1）。
-        现在退订走 image_loader.cancel()，不再依赖 disconnect()。
+        缩略图控件的清理/懒加载逻辑已提取到 GalleryStrip（内部沿用 P0-1 修复：
+        退订走 ``image_loader.cancel()``，不依赖 ``Connection.disconnect()``）。
+        这里只负责取数据、传入当前选中项，并刷新顶栏/底栏。
         """
-        while self._gallery_layout.count():
-            item = self._gallery_layout.takeAt(0)
-            if item is None:
-                break
-            widget = item.widget()
-            if widget is None:
-                continue
-            if isinstance(widget, _GalleryThumbWidget):
-                image_loader.cancel(widget._image_path, widget._on_image_ready)
-            widget.setParent(None)
-            widget.deleteLater()
-
         images = self._library.list_available()
-        self._gallery_pending = list(images)
-        self._gallery_items = []
-        self._gallery_scroll.horizontalScrollBar().setValue(0)
-        self._append_gallery_batch()  # 首批 GALLERY_THUMB_BATCH 张
+        current_path = getattr(self._preview_card, "_current_path", "")
+        self._gallery_strip.reload(list(images), current_path)
 
         # Update bottom and top status bars
         self.update_bottom_bar()
         self.update_top_status()
-
-    def _append_gallery_batch(self) -> None:
-        """从待加载队列取一批图片创建缩略图 widget（主线程）。"""
-        batch = self._gallery_pending[: self.GALLERY_THUMB_BATCH]
-        del self._gallery_pending[: len(batch)]
-        if not batch:
-            return
-        current_path = getattr(self._preview_card, "_current_path", "")
-        for img_path in batch:
-            thumb = _GalleryThumbWidget(img_path, is_current=(img_path == current_path))
-            thumb.clicked.connect(lambda p=img_path: self._on_gallery_click(p))
-            self._gallery_layout.addWidget(thumb)
-        self._gallery_items.extend(batch)
-
-    @Slot()
-    def _maybe_load_more_thumbnails(self, *args) -> None:  # noqa: ANN002
-        """滚动接近右端时追加下一批缩略图（懒加载）。"""
-        if not getattr(self, "_gallery_pending", None):
-            return
-        hbar = self._gallery_scroll.horizontalScrollBar()
-        if hbar.maximum() - hbar.value() <= self.GALLERY_LOAD_AHEAD_PX:
-            self._append_gallery_batch()
 
     def _sync_sidebar_action_state(self) -> None:
         """同步侧边栏收藏按钮状态到当前预览图片。"""
@@ -1280,10 +1158,7 @@ class MainWindow(QMainWindow):
 
     def _highlight_current_gallery_item(self, current_path: str) -> None:
         """Update the visual highlight of the currently active gallery item."""
-        for w_idx in range(self._gallery_layout.count()):
-            widget = self._gallery_layout.itemAt(w_idx).widget()
-            if isinstance(widget, _GalleryThumbWidget):
-                widget.set_is_current(widget._image_path == current_path)
+        self._gallery_strip.set_current(current_path)
 
     def update_bottom_bar(self) -> None:
         """Update bottom status bar with current library info."""
