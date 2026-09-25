@@ -711,3 +711,58 @@ class TestNextSwitchCountdown:
         assert "top" in seen and "cards" in seen
 
 
+class TestSchedulerWallpaperApplierWiring:
+    """#7 双写修复：MainWindow 向调度器注入"按模式分流"的 applier。"""
+
+    def test_applier_injected_after_init(self, main_window):
+        applier = main_window._scheduler._wallpaper_applier
+        assert applier is not None
+        assert applier == main_window._apply_wallpaper_for_mode
+
+    def test_unified_mode_uses_set_wallpaper(self, main_window):
+        fake = MagicMock()
+        fake.set_wallpaper.return_value = True
+        main_window._wallpaper_manager = fake
+        main_window._settings.set("wallpaper_mode", "unified")
+
+        assert main_window._apply_wallpaper_for_mode("D:/x.jpg") is True
+        fake.set_wallpaper.assert_called_once_with("D:/x.jpg")
+
+    def test_per_monitor_mode_uses_switch_per_monitor(self, main_window, monkeypatch):
+        called = []
+        monkeypatch.setattr(
+            main_window,
+            "_switch_per_monitor",
+            lambda: (called.append(1) or True),
+        )
+        fake = MagicMock()
+        fake.is_multi_monitor_supported = True
+        main_window._wallpaper_manager = fake
+        main_window._settings.set("wallpaper_mode", "per_monitor")
+
+        assert main_window._apply_wallpaper_for_mode("D:/x.jpg") is True
+        assert called  # 走了逐屏分配，而非单张统一设置
+
+    def test_scheduler_does_not_double_write(self, main_window):
+        """调度器触发逐屏切换时，不得先调 set_wallpaper 再调 set_wallpapers。"""
+        main_window._settings.set("wallpaper_mode", "per_monitor")
+        fake_lib = MagicMock()
+        fake_lib.get_random.return_value = "D:/a.jpg"
+        fake_lib.list_available.return_value = ["a", "b"]
+        main_window._library = fake_lib
+        fake_wm = MagicMock()
+        fake_wm.is_multi_monitor_supported = True
+        fake_wm.list_monitors.return_value = [{"id": "M1"}, {"id": "M2"}]
+        fake_wm.set_wallpapers.return_value = True
+        fake_wm.set_wallpaper.return_value = True
+        main_window._wallpaper_manager = fake_wm
+        # 调度器持有自己的 library/wallpaper_manager 引用，需一并注入假对象
+        main_window._scheduler.set_dependencies(fake_lib, fake_wm)
+
+        main_window._scheduler.trigger_now()
+
+        assert fake_wm.set_wallpapers.called
+        fake_wm.set_wallpaper.assert_not_called()  # 无双写
+
+
+

@@ -265,3 +265,54 @@ class TestSecondsUntilNext:
 
         scheduler._timer = _DeadTimer()
         assert scheduler.seconds_until_next() is None
+
+
+# ==================== 壁纸设置器注入缝（#7 双写修复） ====================
+
+
+class TestWallpaperApplierSeam:
+    """注入 applier 后必须优先使用它、不再直调 WallpaperManager（消除双写）。"""
+
+    def test_no_applier_uses_wallpaper_manager(self, scheduler, fake_wm):
+        """未注入时行为与原来完全一致（回归护栏）。"""
+        scheduler.trigger_now()
+        assert fake_wm.set_call_count == 1
+
+    def test_applier_takes_priority_and_skips_manager(self, scheduler, fake_wm):
+        calls = []
+        scheduler.set_wallpaper_applier(lambda p: calls.append(p) or True)
+        scheduler.trigger_now()
+        assert calls  # applier 被调用
+        assert fake_wm.set_call_count == 0  # 未直调 WallpaperManager（无双写）
+
+    def test_applier_false_does_not_fall_back(self, scheduler, fake_wm):
+        """applier 正常返回 False（未抛异常）→ 不回落到默认实现。"""
+        scheduler.set_wallpaper_applier(lambda p: False)
+        scheduler.trigger_now()
+        assert fake_wm.set_call_count == 0
+
+    def test_applier_exception_falls_back(self, scheduler, fake_wm):
+        """applier 抛异常 → 吞掉并回落默认实现（绝不冒泡）。"""
+        def boom(path):
+            raise RuntimeError("boom")
+
+        scheduler.set_wallpaper_applier(boom)
+        scheduler.trigger_now()
+        assert fake_wm.set_call_count == 1
+
+    def test_interval_switch_uses_applier(self, fake_library, fake_wm):
+        """_do_interval_switch 同样走 applier（3 处调用点统一）。"""
+        from src.core.scheduler import Scheduler
+        s = Scheduler(mode="interval_minutes", interval_minutes=5)
+        s.set_dependencies(fake_library, fake_wm)
+        called = []
+        s.set_wallpaper_applier(lambda p: called.append(p) or True)
+        s._do_interval_switch()
+        assert called
+        assert fake_wm.set_call_count == 0
+
+    def test_clear_applier_restores_default(self, scheduler, fake_wm):
+        scheduler.set_wallpaper_applier(lambda p: True)
+        scheduler.set_wallpaper_applier(None)  # 清除
+        scheduler.trigger_now()
+        assert fake_wm.set_call_count == 1

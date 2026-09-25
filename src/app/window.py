@@ -211,6 +211,12 @@ class MainWindow(QMainWindow):
         )
         self._wallpaper_manager = wallpaper_manager
         self._scheduler = scheduler
+        # #7：给调度器注入"按模式分流"的壁纸设置器，避免逐屏模式下先统一设一张
+        # 再被覆盖（双写 + 闪烁）。注入后调度器不再直接调 WallpaperManager。
+        if self._scheduler is not None and hasattr(
+            self._scheduler, "set_wallpaper_applier"
+        ):
+            self._scheduler.set_wallpaper_applier(self._apply_wallpaper_for_mode)
 
         self._current_image_index = 0
         self._clock_timer: Optional["QTimer"] = None
@@ -947,6 +953,16 @@ class MainWindow(QMainWindow):
             self._settings.set("per_monitor_map", mapping)
         return success
 
+    def _apply_wallpaper_for_mode(self, image_path: str) -> bool:
+        """调度器设置壁纸的分流器（注入给 Scheduler.set_wallpaper_applier）。
+
+        逐屏模式 → 各显示器独立随机分配；统一模式 → 整屏设置。这样调度器无需
+        直接调用 WallpaperManager，避免逐屏模式下"先统一设一张、再被覆盖"的双写。
+        """
+        if self._is_per_monitor_mode():
+            return self._switch_per_monitor()
+        return self._wallpaper_manager.set_wallpaper(image_path)
+
     def _update_multi_monitor_availability(self) -> None:
         """按平台/COM/显示器数启用或置灰「逐屏独立壁纸」开关。"""
         page = getattr(self, "_settings_page", None)
@@ -1036,10 +1052,6 @@ class MainWindow(QMainWindow):
             self._update_info_cards()
             self.update_top_status()
             self.update_bottom_bar()
-            # 逐屏模式：调度器走的是统一 set_wallpaper，这里补一次逐屏分配覆盖它，
-            # 使自动切换也能按显示器分配不同图片。
-            if self._is_per_monitor_mode():
-                self._switch_per_monitor()
         except Exception:
             logger.exception("更新 UI 失败")
 

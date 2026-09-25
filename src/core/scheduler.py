@@ -57,6 +57,8 @@ class Scheduler:
         self._on_switch: Optional[Callable[[str], None]] = None
         self._library: Optional["ImageLibrary"] = None
         self._wallpaper_manager: Optional["WallpaperManager"] = None
+        # 可注入的壁纸设置器（#7 逐屏模式分流用）。None = 回落 WallpaperManager。
+        self._wallpaper_applier: Optional[Callable[[str], bool]] = None
 
         logger.info(
             "Scheduler 初始化: mode=%s, daily=%s, interval=%s",
@@ -72,6 +74,41 @@ class Scheduler:
     ) -> None:
         self._library = library
         self._wallpaper_manager = wallpaper_manager
+
+    def set_wallpaper_applier(
+        self, func: Optional[Callable[[str], bool]]
+    ) -> None:
+        """注入自定义的壁纸设置器（可选）。
+
+        默认 ``None`` = 保持原有行为（直接调用 ``WallpaperManager.set_wallpaper``）。
+        MainWindow 会注入一个"按模式分流"的实现：逐屏模式走各显示器独立分配，
+        统一模式走整屏设置 —— 这样 Scheduler 无需依赖 GUI，也能避免"先统一设一张
+        再被逐屏覆盖"的双写与闪烁。
+
+        Args:
+            func: 接收图片路径、返回是否成功的回调；``None`` 表示恢复默认实现。
+        """
+        self._wallpaper_applier = func
+
+    def _apply_wallpaper(self, image_path: str) -> bool:
+        """设置壁纸：优先用注入的 applier，否则回落 WallpaperManager。
+
+        注入实现若抛异常，则记录日志并回落默认实现（绝不中断调度流程）。
+
+        Args:
+            image_path: 图片绝对路径。
+
+        Returns:
+            是否设置成功。
+        """
+        if self._wallpaper_applier is not None:
+            try:
+                return bool(self._wallpaper_applier(image_path))
+            except Exception:
+                logger.warning("注入的壁纸设置回调异常，回落默认实现", exc_info=True)
+        if self._wallpaper_manager is None:
+            return False
+        return self._wallpaper_manager.set_wallpaper(image_path)
 
     @property
     def mode(self) -> str:
@@ -123,7 +160,7 @@ class Scheduler:
             logger.warning("没有可用图片可切换")
             return
 
-        success = self._wallpaper_manager.set_wallpaper(image_path)
+        success = self._apply_wallpaper(image_path)
         if success:
             logger.info("手动触发切换: %s", Path(image_path).name)
             if self._on_switch:
@@ -297,7 +334,7 @@ class Scheduler:
             logger.warning("无可用的图片")
             return
 
-        success = self._wallpaper_manager.set_wallpaper(image_path)
+        success = self._apply_wallpaper(image_path)
         if success:
             logger.info("每日自动切换: %s", Path(image_path).name)
             if self._on_switch:
@@ -364,7 +401,7 @@ class Scheduler:
             logger.warning("无可用的图片")
             return
 
-        success = self._wallpaper_manager.set_wallpaper(image_path)
+        success = self._apply_wallpaper(image_path)
         if success:
             logger.info("间隔自动切换: %s", Path(image_path).name)
             if self._on_switch:
