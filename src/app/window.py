@@ -12,10 +12,7 @@ from typing import TYPE_CHECKING, Optional
 
 from PySide6.QtCore import (
     Qt,
-    QObject,
-    QRunnable,
     QSize,
-    QThreadPool,
     Signal,
     Slot,
     QTimer,
@@ -59,47 +56,12 @@ from src.app.tray import TrayIcon
 from src.app.widgets.preview_card import PreviewCardWidget
 from src.app.icon import create_app_icon
 from src.app import image_loader
+from src.app.scan_controller import ScanController
 from src.core.autostart_registry import AutostartManager
 from src.app.pages.gallery_page import GalleryPage
 from src.app.pages.settings_page import SettingsPage
 
 logger = logging.getLogger(__name__)
-
-
-# ---------------------------------------------------------------------------
-# Background library scan (QRunnable + QThreadPool)
-# ---------------------------------------------------------------------------
-
-
-class _ScanSignals(QObject):
-    """后台扫描完成信号的载体（随 MainWindow 生命周期）。"""
-
-    finished = Signal(list)  # list[str] — 扫描得到的图片路径
-
-
-class _ScanJob(QRunnable):
-    """后台扫描任务：只调用 ImageLibrary.scan() 纯数据操作，绝不触碰 QWidget。
-
-    扫描结果通过 Qt 信号以队列连接（QueuedConnection）回到主线程，
-    由 MainWindow._on_scan_finished 在主线程更新 UI。
-    """
-
-    def __init__(self, library: "ImageLibrary", signals: _ScanSignals) -> None:
-        super().__init__()
-        self._library = library
-        self._signals = signals
-
-    def run(self) -> None:
-        try:
-            images = self._library.scan()
-        except Exception:
-            logger.exception("后台扫描图片库失败")
-            images = []
-        try:
-            self._signals.finished.emit(images)
-        except RuntimeError:
-            # 信号载体已随窗口销毁，静默丢弃结果
-            pass
 
 
 # ---------------------------------------------------------------------------
@@ -225,14 +187,11 @@ class MainWindow(QMainWindow):
         self._last_clock_date_text: Optional[str] = None
         self._last_next_text: Optional[str] = None
 
-        # --- 异步扫描基础设施 ---
-        # 专用单线程池：保证任何时刻最多一个扫描任务，避免并发 scan。
-        self._scan_pool = QThreadPool(self)
-        self._scan_pool.setMaxThreadCount(1)
-        self._scan_signals = _ScanSignals(self)
-        self._scan_signals.finished.connect(self._on_scan_finished)
-        self._scan_running = False
-        self._scan_pending = False  # 扫描期间又有刷新请求时置位，完成后补一次
+        # --- 异步扫描基础设施（#1：状态机已提取到 ScanController）---
+        # 专用单线程池 + running/pending 合并补扫，均封装在 ScanController 内。
+        self._scan = ScanController(self._library, self)
+        self._scan.started.connect(self._on_scan_started)
+        self._scan.finished.connect(self._on_scan_finished)
 
         # --- 缩略图懒加载状态 ---
         self._gallery_pending: list = []  # 尚未创建 widget 的图片路径
@@ -1114,15 +1073,34 @@ class MainWindow(QMainWindow):
         """
         self._start_async_scan()
 
+    # ===== 扫描状态 facade（#1：委托给 ScanController，保持既有入口兼容）=====
+
+    @property
+    def _scan_running(self) -> bool:
+        """是否正在后台扫描（读写，兼容既有测试对 run 中守卫的断言）。"""
+        return self._scan.running
+
+    @_scan_running.setter
+    def _scan_running(self, value: bool) -> None:
+        self._scan.running = bool(value)
+
+    @property
+    def _scan_pending(self) -> bool:
+        """扫描期间是否已排队一次补扫（读写，兼容既有测试）。"""
+        return self._scan.pending
+
+    @_scan_pending.setter
+    def _scan_pending(self, value: bool) -> None:
+        self._scan.pending = bool(value)
+
     def _start_async_scan(self) -> None:
-        """投递一次后台扫描。扫描进行中再次调用时合并为一次补扫。"""
-        if self._scan_running:
-            # 防重入：不并发多个 scan，标记待补扫即可
-            self._scan_pending = True
-            return
-        self._scan_running = True
+        """投递一次后台扫描（委托 ScanController）。扫描进行中合并为一次补扫。"""
+        self._scan.request_scan()
+
+    @Slot()
+    def _on_scan_started(self) -> None:
+        """后台扫描开始回调（主线程）：进入扫描态 UI。"""
         self._set_scan_ui_state(True)
-        self._scan_pool.start(_ScanJob(self._library, self._scan_signals))
 
     def _on_dirs_changed(self) -> None:
         """监听的图片文件夹内容发生变化 → 触发一次后台重扫。
@@ -1364,6 +1342,9 @@ class MainWindow(QMainWindow):
         if hasattr(self, "_watcher") and self._watcher is not None:
             # 停止 watchdog Observer 并 join，避免后台线程导致进程无法退出
             self._watcher.stop()
+        # 停止在途扫描并等待线程池结束，避免 QThreadPool 析构阻塞退出（#1）
+        if getattr(self, "_scan", None) is not None:
+            self._scan.shutdown()
         # 释放逐屏壁纸的 COM 对象，避免泄漏（幂等，非 Windows 下为空操作）
         if getattr(self, "_wallpaper_manager", None) is not None:
             try:
