@@ -529,24 +529,6 @@ class MainWindow(QMainWindow):
         self._gallery_page = page
         return page
 
-    def _build_gallery_placeholder(self) -> QWidget:
-        page = QWidget()
-        layout = QVBoxLayout(page)
-        layout.setContentsMargins(24, 16, 24, 16)
-
-        title = QLabel("图片库")
-        title.setObjectName("title")
-        title.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        layout.addWidget(title)
-
-        info = QLabel("添加图片文件夹后，这里会显示缩略图预览")
-        info.setObjectName("sub-title")
-        info.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        info.setStyleSheet("padding: 20px 0;")
-        layout.addWidget(info)
-        layout.addStretch()
-        return page
-
     def _build_clock_placeholder(self) -> QWidget:
         page = QWidget()
         layout = QVBoxLayout(page)

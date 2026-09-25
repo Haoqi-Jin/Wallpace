@@ -61,6 +61,8 @@ dev-log/
 .agents/
 .codex/
 CODEX_SESSION.md
+.agnes/
+.workbuddy/
 
 # Mockups (optional, can keep if needed)
 # mockups/
