@@ -15,6 +15,17 @@ from PySide6.QtCore import QSize, QCoreApplication
 from PySide6.QtGui import QImage
 
 
+@pytest.fixture(autouse=True)
+def _clear_image_cache():
+    """缩略图缓存是模块级单例，用例间必须隔离，否则会互相污染。
+
+    每个用例前后各清空一次（含命中/未命中计数），保证断言的是本用例的行为。
+    """
+    image_loader.clear_cache()
+    yield
+    image_loader.clear_cache()
+
+
 class TestImageLoaderImport:
     """测试模块导入和基本结构。"""
 
@@ -263,3 +274,145 @@ class TestBroadcastSubscription:
         _, img_received = results[0]
         assert img_received.width() == 100
         assert img_received.height() == 100
+
+
+class TestImageCache:
+    """缩略图内存 LRU 缓存（#12）：命中跳过线程池、双上限淘汰、类型护栏、失效。"""
+
+    @pytest.fixture(autouse=True)
+    def app(self):
+        """确保有 QApplication 实例（缓存命中走 QTimer.singleShot 需要事件循环）。"""
+        import os
+        os.environ["QT_QPA_PLATFORM"] = "offscreen"
+        from PySide6.QtWidgets import QApplication
+        if not QApplication.instance():
+            QApplication([])
+        yield
+
+    @staticmethod
+    def _wait(predicate, timeout: float = 5.0) -> bool:
+        import time
+        deadline = time.time() + timeout
+        while time.time() < deadline:
+            if predicate():
+                return True
+            QCoreApplication.processEvents()
+            time.sleep(0.02)
+        return predicate()
+
+    @staticmethod
+    def _write_image(path: Path, color: int = 0xFF0000, size: int = 40) -> None:
+        """写一张纯色 PNG（尺寸=目标尺寸，避免缩放影响像素断言）。"""
+        from PySide6.QtGui import QImageWriter
+        img = QImage(size, size, QImage.Format_RGB32)
+        img.fill(color)
+        QImageWriter.write(img, str(path), "PNG")
+
+    def _load_and_wait(self, path: Path, size: QSize = QSize(40, 40)) -> list:
+        """load_async 并等到回调触发，返回收到的图片列表。"""
+        got: list = []
+        image_loader.load_async(str(path), size, lambda p, i: got.append(i))
+        assert self._wait(lambda: got), f"解码超时: {path}"
+        return got
+
+    def test_hit_reuses_cache_without_new_pool_task(self, tmp_path, monkeypatch):
+        """同一 path+size 二次加载 → 命中，且不再产生新的线程池任务。"""
+        path = tmp_path / "hit.png"
+        self._write_image(path)
+
+        # 用计数子类替换 _DecodeJob，统计线程池任务的真实创建次数。
+        started: list = []
+        real_job = image_loader._DecodeJob
+
+        class _CountingJob(real_job):
+            def __init__(self, *args, **kwargs):
+                started.append(1)
+                super().__init__(*args, **kwargs)
+
+        monkeypatch.setattr(image_loader, "_DecodeJob", _CountingJob)
+
+        first = self._load_and_wait(path)
+        assert first and isinstance(first[0], QImage)
+        assert len(started) == 1
+        assert image_loader.cache_stats()["misses"] == 1
+
+        second = self._load_and_wait(path)
+        stats = image_loader.cache_stats()
+        assert stats["hits"] == 1
+        assert len(started) == 1  # 命中：跳过 QThreadPool，无新任务
+        assert second and isinstance(second[0], QImage)
+
+    def test_evicts_oldest_when_over_max_entries(self, tmp_path):
+        """条目数超上限时淘汰最久未使用项。"""
+        image_loader.configure_cache(max_entries=2, max_bytes=128 * 1024 * 1024)
+        paths = []
+        for name in ("e1.png", "e2.png", "e3.png"):
+            p = tmp_path / name
+            self._write_image(p)
+            self._load_and_wait(p)
+            paths.append(p)
+
+        assert image_loader.cache_stats()["entries"] == 2
+        oldest_key = image_loader._make_key(str(paths[0]), QSize(40, 40))
+        assert image_loader._cache.get(oldest_key) is None  # 最旧的已被淘汰 → miss
+
+    def test_bitmap_cache_never_stores_pixmap(self, tmp_path):
+        """把"只缓存 QImage、绝不缓存 QPixmap"固化为护栏。"""
+        from PySide6.QtGui import QPixmap
+        path = tmp_path / "type.png"
+        self._write_image(path)
+        self._load_and_wait(path)
+
+        with image_loader._cache._lock:
+            values = list(image_loader._cache._store.values())
+        assert values
+        for value in values:
+            assert isinstance(value, QImage)
+            assert not isinstance(value, QPixmap)
+
+    def test_bytes_limit_drops_oversized_entry(self, tmp_path):
+        """字节上限：单张图超过 max_bytes 时不入缓存（put 后被立即淘汰）。"""
+        image_loader.configure_cache(max_entries=100, max_bytes=1)
+        path = tmp_path / "big.png"
+        self._write_image(path)
+
+        got = self._load_and_wait(path)
+        assert got  # 解码仍成功交付，只是不缓存
+        stats = image_loader.cache_stats()
+        assert stats["entries"] == 0
+        assert stats["bytes"] == 0
+
+    def test_invalidated_when_file_changes(self, tmp_path):
+        """改写同一路径（mtime_ns 变化）→ 产生新 key → 重新解码而非返回旧图。"""
+        import os
+        path = tmp_path / "mutable.png"
+        self._write_image(path, color=0xFF0000)  # 红
+        self._load_and_wait(path)
+        assert image_loader.cache_stats()["misses"] == 1
+
+        # 改写内容，并强制 mtime_ns 前移，规避 Windows 时间戳 tick 量化。
+        self._write_image(path, color=0x0000FF)  # 蓝
+        st = os.stat(path)
+        os.utime(path, ns=(st.st_atime_ns, st.st_mtime_ns + 10_000_000))
+
+        second = self._load_and_wait(path)
+        stats = image_loader.cache_stats()
+        assert stats["misses"] == 2  # 重新解码
+        assert stats["hits"] == 0
+        assert second[0].pixelColor(0, 0).blue() > 200  # 拿到的是新内容
+
+    def test_broadcast_listener_receives_on_cache_hit(self, tmp_path):
+        """命中路径仍要广播给全局监听者（与未命中行为一致）。"""
+        path = tmp_path / "bcast.png"
+        self._write_image(path)
+        self._load_and_wait(path)  # 预热缓存
+
+        received: list = []
+        sub = image_loader.connect_ready(lambda p, i: received.append(p))
+        try:
+            image_loader.load_async(str(path), QSize(40, 40))  # 命中
+            assert self._wait(lambda: received)
+            assert len(received) == 1
+        finally:
+            sub.disconnect()
+

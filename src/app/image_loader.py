@@ -28,13 +28,25 @@ emit 会扇出 N 次回调，整体是 O(N²) 次主线程回调（P1-4）。
 
     sub = image_loader.connect_ready(lambda path, image: ...)
     sub.disconnect()
+
+内存缓存（#12）
+---------------
+模块内维护一层有容量上限的 LRU 缩略图缓存（`_ImageCache`），键为
+``(resolved_path, st_mtime_ns, width, height)``。命中时 ``load_async`` 会
+**跳过线程池**并立即（经 ``QTimer.singleShot(0, ...)``）在主线程回投结果，
+从而避免二次刷新/滚动回看时重复解码同一张图。缓存**只存 ``QImage``**
+（跨线程安全），``QPixmap`` 的转换仍留在 GUI 线程。可用
+``configure_cache()`` / ``cache_stats()`` / ``clear_cache()`` 管理。
 """
 
 import logging
+import os
 import threading
-from typing import Callable, Dict, List, Optional
+from collections import OrderedDict
+from pathlib import Path
+from typing import Callable, Dict, List, Optional, Tuple
 
-from PySide6.QtCore import QObject, QRunnable, QSize, QThreadPool, Signal
+from PySide6.QtCore import QObject, QRunnable, QSize, QThreadPool, QTimer, Signal
 from PySide6.QtGui import QImage, QImageReader
 
 logger = logging.getLogger(__name__)
@@ -90,6 +102,136 @@ _subscribers_lock: threading.Lock = threading.Lock()
 # --- 兼容用的全局广播列表 ---
 _broadcast: List[_ReadyCallback] = []
 _broadcast_lock: threading.Lock = threading.Lock()
+
+# --- 缩略图内存 LRU 缓存（#12） ---
+# 只缓存 QImage（CPU 侧、跨线程安全的隐式共享位图），**绝不缓存 QPixmap**
+# —— QPixmap 依赖 GUI 线程的 backing store，只能在它所属的线程构造/使用，
+# 而解码发生在 QThreadPool 工作线程；QPixmap 转换必须留在 GUI 线程。
+_CacheKey = Tuple[str, int, int, int]  # (resolved_path, st_mtime_ns, width, height)
+
+
+class _ImageCache:
+    """有容量上限的线程安全 LRU 缩略图缓存（仅存 QImage）。
+
+    双上限：``max_entries``（条目数）与 ``max_bytes``（``sizeInBytes`` 累计）。
+    任一超出即从"最久未使用"端（``popitem(last=False)``）淘汰；命中把条目
+    移到末尾（标记为最近使用）。用 ``threading.Lock`` 保护：``put`` 在工作
+    线程调用、``get`` 可能在 GUI 线程调用。
+    """
+
+    def __init__(
+        self, max_entries: int = 512, max_bytes: int = 128 * 1024 * 1024
+    ) -> None:
+        self._store: "OrderedDict[_CacheKey, QImage]" = OrderedDict()
+        self._lock: threading.Lock = threading.Lock()
+        self.max_entries: int = max(1, int(max_entries))
+        self.max_bytes: int = max(0, int(max_bytes))
+        self._bytes: int = 0
+        self._hits: int = 0
+        self._misses: int = 0
+
+    def get(self, key: Optional[_CacheKey]) -> Optional[QImage]:
+        """按键取值；命中返回 QImage 并标记最近使用，未命中返回 None。"""
+        if key is None:
+            return None
+        with self._lock:
+            image = self._store.get(key)
+            if image is None:
+                self._misses += 1
+                return None
+            self._store.move_to_end(key)
+            self._hits += 1
+            return image
+
+    def put(self, key: Optional[_CacheKey], image: Optional[QImage]) -> None:
+        """写入缓存，随后按双上限淘汰直至满足约束。"""
+        if key is None or image is None:
+            return
+        size = int(image.sizeInBytes())
+        with self._lock:
+            existing = self._store.get(key)
+            if existing is not None:
+                self._bytes -= int(existing.sizeInBytes())
+                self._store.move_to_end(key)
+            self._store[key] = image
+            self._bytes += size
+            self._evict()
+
+    def _evict(self) -> None:
+        """淘汰最久未使用条目直至条目数/字节数都在上限内（须持锁调用）。"""
+        while self._store and (
+            len(self._store) > self.max_entries or self._bytes > self.max_bytes
+        ):
+            _, evicted = self._store.popitem(last=False)
+            self._bytes -= int(evicted.sizeInBytes())
+        if self._bytes < 0:
+            self._bytes = 0
+
+    def configure(self, max_entries: int, max_bytes: int) -> None:
+        """调整上限并立即按新上限淘汰（不重置命中/未命中计数）。"""
+        with self._lock:
+            self.max_entries = max(1, int(max_entries))
+            self.max_bytes = max(0, int(max_bytes))
+            self._evict()
+
+    def clear(self) -> None:
+        """清空缓存并重置所有计数（测试隔离 / 运行时重置用）。"""
+        with self._lock:
+            self._store.clear()
+            self._bytes = 0
+            self._hits = 0
+            self._misses = 0
+
+    def stats(self) -> Dict[str, int]:
+        """返回 ``{"entries", "bytes", "hits", "misses"}`` 快照。"""
+        with self._lock:
+            return {
+                "entries": len(self._store),
+                "bytes": self._bytes,
+                "hits": self._hits,
+                "misses": self._misses,
+            }
+
+
+_cache: _ImageCache = _ImageCache()
+
+
+def _make_key(path: str, target_size: Optional[QSize]) -> Optional[_CacheKey]:
+    """构造缓存键 ``(resolved_path, st_mtime_ns, width, height)``。
+
+    ``mtime_ns`` 用于感知"同名文件被替换"——否则改写内容后会一直命中旧图；
+    ``width/height`` 用于区分同一路径的不同需求尺寸（画廊 tile vs 预览大图）。
+
+    Returns:
+        键元组；文件不存在 / 不可 stat 时返回 None（该次加载不参与缓存）。
+    """
+    try:
+        resolved = str(Path(path).resolve())
+        mtime_ns = os.stat(resolved).st_mtime_ns
+    except OSError:
+        return None
+    if target_size is not None and target_size.isValid():
+        width, height = target_size.width(), target_size.height()
+    else:
+        width, height = 0, 0
+    return (resolved, mtime_ns, width, height)
+
+
+def configure_cache(
+    max_entries: int = 512, max_bytes: int = 128 * 1024 * 1024
+) -> None:
+    """配置缓存上限（条目数与字节数），并立即按新上限淘汰。"""
+    _cache.configure(max_entries, max_bytes)
+
+
+def cache_stats() -> Dict[str, int]:
+    """返回当前缓存统计：``{"entries", "bytes", "hits", "misses"}``。"""
+    return _cache.stats()
+
+
+def clear_cache() -> None:
+    """清空缓存并重置统计计数。"""
+    _cache.clear()
 
 
 def _get_pool() -> QThreadPool:
@@ -164,6 +306,19 @@ def pending_count() -> int:
         return len(_subscribers)
 
 
+def _notify_broadcast(path: str, image: "QImage") -> None:
+    """把结果广播给全局监听者（主线程）。缓存命中路径也复用它。"""
+    with _broadcast_lock:
+        listeners = list(_broadcast)
+    for listener in listeners:
+        try:
+            listener(path, image)
+        except RuntimeError:
+            pass
+        except Exception:
+            logger.exception("广播图片就绪回调异常: %s", path)
+
+
 def _dispatch(path: str, image: "QImage") -> None:
     """把解码结果投递给该 path 的订阅者，再广播给全局监听者（主线程）。"""
     with _subscribers_lock:
@@ -177,24 +332,22 @@ def _dispatch(path: str, image: "QImage") -> None:
         except Exception:
             logger.exception("图片就绪回调异常: %s", path)
 
-    with _broadcast_lock:
-        listeners = list(_broadcast)
-    for listener in listeners:
-        try:
-            listener(path, image)
-        except RuntimeError:
-            pass
-        except Exception:
-            logger.exception("广播图片就绪回调异常: %s", path)
+    _notify_broadcast(path, image)
 
 
 class _DecodeJob(QRunnable):
-    """后台解码任务：读取图片 → 受限尺寸缩放 → 回主线程分发。"""
+    """后台解码任务：读取图片 → 受限尺寸缩放 → 写缓存 → 回主线程分发。"""
 
-    def __init__(self, path: str, target_size: QSize) -> None:
+    def __init__(
+        self,
+        path: str,
+        target_size: QSize,
+        key: Optional[_CacheKey] = None,
+    ) -> None:
         super().__init__()
         self._path = path
         self._target_size = target_size
+        self._key = key
 
     def run(self) -> None:
         try:
@@ -207,9 +360,11 @@ class _DecodeJob(QRunnable):
                 logger.warning(
                     "图片解码失败: %s (%s)", self._path, reader.errorString()
                 )
-                # 失败也要清理订阅表，避免条目无限堆积
+                # 失败也要清理订阅表，避免条目无限堆积；失败态绝不入缓存。
                 _discard(self._path)
                 return
+            # 只缓存成功解码的 QImage（在工作线程写入，加锁保护）。
+            _cache.put(self._key, image)
             # emit 会自动排队到主线程（_signals 生存在主线程）
             _signals.ready.emit(self._path, image)
         except RuntimeError:
@@ -233,16 +388,39 @@ def load_async(
 ) -> None:
     """异步解码图片，完成后只回调该 path 的订阅者（再广播给全局监听者）。
 
+    命中缩略图内存缓存时**跳过 QThreadPool**，直接经 ``QTimer.singleShot(0,
+    ...)`` 在主线程投递结果 —— 这是缓存的核心收益：二次刷新/滚动回看不重复
+    解码、也不排队，同时保持 ``on_ready`` 仍在 GUI 主线程执行的对外契约。
+
     Args:
         path: 图片文件绝对路径。
         target_size: 目标尺寸；None 表示原图。
         on_ready: 可选的按 path 回调，签名 on_ready(path, image)，在主线程执行。
             传入后无需 connect/disconnect。
     """
+    size = target_size if target_size is not None else QSize(0, 0)
+    key = _make_key(path, size)
+    hit = _cache.get(key)
+    if hit is not None:
+        # 命中：跳过线程池。用 singleShot 投递，保证回调仍在 GUI 主线程执行；
+        # 同时照常广播给全局监听者，保持与未命中路径一致的行为。
+        def _deliver_hit() -> None:
+            if on_ready is not None:
+                try:
+                    on_ready(path, hit)
+                except RuntimeError:
+                    pass
+                except Exception:
+                    logger.exception("图片就绪回调异常: %s", path)
+            _notify_broadcast(path, hit)
+
+        QTimer.singleShot(0, _deliver_hit)
+        return
+
     if on_ready is not None:
         with _subscribers_lock:
             _subscribers.setdefault(path, []).append(on_ready)
-    _get_pool().start(_DecodeJob(path, target_size or QSize(0, 0)))
+    _get_pool().start(_DecodeJob(path, size, key))
 
 
 def _on_decoded(path: str, image: object) -> None:
