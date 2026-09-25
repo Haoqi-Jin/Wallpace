@@ -214,6 +214,10 @@ class MainWindow(QMainWindow):
 
         self._current_image_index = 0
         self._clock_timer: Optional["QTimer"] = None
+        # 时钟文本去重缓存（#8）：文本未变化时不再 setText，避免 1 Hz 无效重绘
+        self._last_clock_time_text: Optional[str] = None
+        self._last_clock_date_text: Optional[str] = None
+        self._last_next_text: Optional[str] = None
 
         # --- 异步扫描基础设施 ---
         # 专用单线程池：保证任何时刻最多一个扫描任务，避免并发 scan。
@@ -617,34 +621,62 @@ class MainWindow(QMainWindow):
         self._clock_timer.start(1000)  # 每秒更新
 
     def _update_clock(self) -> None:
-        """每秒更新时钟页面和顶部日期显示。"""
+        """每秒更新时钟页面和顶部日期显示。
+
+        #8 低频刷新：只在文本发生变化时才 ``setText``（比对 ``_last_*`` 缓存），
+        避免倒计时/时钟每秒产生无效重绘。仍复用既有 1 Hz ``_clock_timer``。
+        """
         now = datetime.now()
         if hasattr(self, "_clock_time_label"):
-            self._clock_time_label.setText(now.strftime("%H:%M:%S"))
+            time_text = now.strftime("%H:%M:%S")
+            if time_text != self._last_clock_time_text:
+                self._clock_time_label.setText(time_text)
+                self._last_clock_time_text = time_text
         if hasattr(self, "_clock_date_label"):
-            self._clock_date_label.setText(now.strftime("%Y年%m月%d日  %A"))
+            date_text = now.strftime("%Y年%m月%d日  %A")
+            if date_text != self._last_clock_date_text:
+                self._clock_date_label.setText(date_text)
+                self._last_clock_date_text = date_text
         if hasattr(self, "_clock_next_label"):
-            self._clock_next_label.setText(self._get_next_switch_text())
+            next_text = self._get_next_switch_text()
+            if next_text != self._last_next_text:
+                self._clock_next_label.setText(next_text)
+                self._last_next_text = next_text
 
     def _get_next_switch_text(self) -> str:
-        """获取下次切换时间的描述文本。"""
-        if self._scheduler is None:
+        """获取「下次切换」描述文本（时钟页与信息卡复用）。
+
+        暂停时冻结为固定文案；运行中显示实时倒计时（秒级）。若调度器在运行但
+        无法取到剩余秒数（如单次定时器已触发等边界情况），退回静态文案而非
+        显示 ``None``。
+        """
+        scheduler = self._scheduler
+        if scheduler is None:
             return "调度器未启动"
-        if not self._scheduler.is_active:
+        if scheduler.is_paused:
+            return "⏸ 已暂停（倒计时已冻结）"
+        if not scheduler.is_active:
             return "● 调度已暂停"
-        mode = self._scheduler.mode
+
+        mode = scheduler.mode
+        remaining = scheduler.seconds_until_next()
+
         if mode == "daily_random":
-            next_time = self._scheduler.get_next_switch_time()
+            if remaining is not None:
+                hours, remainder = divmod(remaining, 3600)
+                minutes, seconds = divmod(remainder, 60)
+                return f"距下次切换还有 {hours}小时{minutes}分{seconds}秒"
+            next_time = scheduler.get_next_switch_time()
             if next_time:
-                delta = next_time - datetime.now()
-                hours, remainder = divmod(int(delta.total_seconds()), 3600)
-                minutes = remainder // 60
-                return f"下次切换: {hours}小时{minutes}分钟后 ({next_time.strftime('%H:%M')})"
+                return f"下次切换: {next_time.strftime('%H:%M')}"
             return "下次切换: 明天自动切换"
-        elif mode == "interval_minutes":
-            mins = self._scheduler.interval_minutes or 60
+        if mode == "interval_minutes":
+            if remaining is not None:
+                minutes, seconds = divmod(remaining, 60)
+                return f"距下次切换还有 {minutes}分{seconds}秒"
+            mins = scheduler.interval_minutes or 60
             return f"每 {mins} 分钟自动切换一次"
-        elif mode == "manual":
+        if mode == "manual":
             return "手动模式，不会自动切换"
         return ""
 
@@ -1019,12 +1051,20 @@ class MainWindow(QMainWindow):
         if self._scheduler is not None:
             self._scheduler.pause()
         self._tray.update_pause_status(True)
+        # #8：暂停后立即刷新顶栏/信息卡/时钟，让"已暂停"当帧可见（此前只更新托盘）
+        self.update_top_status()
+        self._update_info_cards()
+        self._update_clock()
         logger.info("调度已暂停")
 
     def resume_scheduler(self) -> None:
         if self._scheduler is not None:
             self._scheduler.resume()
         self._tray.update_pause_status(False)
+        # #8：恢复后立即刷新，倒计时当帧恢复显示
+        self.update_top_status()
+        self._update_info_cards()
+        self._update_clock()
         logger.info("调度已恢复")
 
     # ===== UI 更新 =====

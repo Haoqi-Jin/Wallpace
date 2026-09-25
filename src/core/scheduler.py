@@ -306,6 +306,37 @@ class Scheduler:
         if self._is_running and not self._is_paused:
             self._start_daily_timer()
 
+    def seconds_until_next(self) -> Optional[int]:
+        """距下次自动切换的剩余秒数；未运行/已暂停/无定时器 → None。
+
+        统一覆盖 daily_random 与 interval_minutes 两种模式（都走 ``self._timer``）。
+
+        实测结论（PySide6 6.x / Python 3.13 / Windows / offscreen）：
+        ``QTimer.remainingTime()`` 对**单次与重复定时器**都返回「距下次触发的
+        毫秒数」，且**重复定时器每次触发后会重置为完整周期**：
+          * 单次 2000ms：start→2000、+300ms→1697、+1800ms→193、触发后→**-1**
+          * 重复 300ms：start→300、+150ms→144、触发后→253、再 +250ms→2
+        因此：
+          * ``ms < 0``（定时器未激活 / 单次已触发）视为「无有效倒计时」→ None，
+            避免把 -1 当成 "0 秒" 显示；
+          * 否则返回 ``ms // 1000``（整秒向下取整）。
+        暂停 → ``_pause_timers()`` 已把 ``_timer`` 置 None，故返回 None，
+        「暂停即冻结」由本方法保证。
+
+        Returns:
+            剩余秒数（>=0）；无有效倒计时返回 None。
+        """
+        if not self._is_running or self._is_paused or self._timer is None:
+            return None
+        try:
+            ms = self._timer.remainingTime()
+        except RuntimeError:
+            # 定时器底层 C++ 对象可能已被析构
+            return None
+        if ms < 0:
+            return None
+        return ms // 1000
+
     def get_next_switch_time(self) -> Optional[datetime]:
         """Return the next scheduled switch time (daily_random mode only).
 

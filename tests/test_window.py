@@ -630,3 +630,84 @@ class TestMultiMonitorWallpaper:
         assert fake_com.set_wallpapers.called
         assert warnings  # 明确暴露原因
 
+
+class _SpyLabel:
+    """记录 setText 调用的轻量替身（用于低频刷新护栏）。"""
+
+    def __init__(self):
+        self.texts = []
+
+    def setText(self, text):
+        self.texts.append(text)
+
+    def text(self):
+        return self.texts[-1] if self.texts else ""
+
+
+class TestNextSwitchCountdown:
+    """#8 暂停态文案 + 运行态倒计时 + 低频刷新护栏。"""
+
+    def test_not_running_shows_paused_placeholder(self, main_window):
+        # manual 模式且未 start → 非运行态
+        assert main_window._get_next_switch_text() == "● 调度已暂停"
+
+    def test_pause_shows_paused_text(self, main_window):
+        main_window._scheduler.start()  # manual start：置 running=True
+        main_window.pause_scheduler()
+        assert "已暂停" in main_window._get_next_switch_text()
+
+    def test_interval_running_shows_countdown_with_minutes(self, main_window):
+        s = main_window._scheduler
+        s.mode = "interval_minutes"
+        s.set_interval_minutes(5)
+        s.start()
+        try:
+            text = main_window._get_next_switch_text()
+            assert "距下次切换还有" in text
+            assert "分" in text
+        finally:
+            s.stop()
+
+    def test_resume_restores_countdown(self, main_window):
+        s = main_window._scheduler
+        s.mode = "interval_minutes"
+        s.set_interval_minutes(5)
+        s.start()
+        try:
+            main_window.pause_scheduler()
+            assert "已暂停" in main_window._get_next_switch_text()
+            main_window.resume_scheduler()
+            assert "距下次切换还有" in main_window._get_next_switch_text()
+        finally:
+            s.stop()
+
+    def test_update_clock_skips_redundant_next_text(self, main_window, monkeypatch):
+        """护栏：文本未变化时 _update_clock 不得重复 setText（低频刷新）。"""
+        spy = _SpyLabel()
+        main_window._clock_next_label = spy
+        monkeypatch.setattr(main_window, "_get_next_switch_text", lambda: "固定文案")
+        main_window._last_next_text = None
+
+        main_window._update_clock()
+        main_window._update_clock()
+
+        assert spy.texts == ["固定文案"]  # 第二次文本未变 → 未再 setText
+
+        monkeypatch.setattr(main_window, "_get_next_switch_text", lambda: "新文案")
+        main_window._update_clock()
+        assert spy.texts == ["固定文案", "新文案"]
+
+    def test_pause_refreshes_ui_immediately(self, main_window, monkeypatch):
+        """暂停/恢复应立即使在顶栏与信息卡体现（此前只更新托盘）。"""
+        main_window._scheduler.start()
+        seen = []
+        monkeypatch.setattr(
+            main_window, "update_top_status", lambda: seen.append("top")
+        )
+        monkeypatch.setattr(
+            main_window, "_update_info_cards", lambda: seen.append("cards")
+        )
+        main_window.pause_scheduler()
+        assert "top" in seen and "cards" in seen
+
+

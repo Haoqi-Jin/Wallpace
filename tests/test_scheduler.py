@@ -195,3 +195,73 @@ class TestIntegration:
         s = Scheduler(mode="manual")
         # 未注入依赖时 trigger_now 不应崩溃
         s.trigger_now()
+
+
+# ==================== 倒计时剩余秒数（#8） ====================
+
+
+class TestSecondsUntilNext:
+    """seconds_until_next() 的语义（含 remainingTime 实测结论的护栏）。"""
+
+    @pytest.fixture(autouse=True)
+    def app(self):
+        """interval 模式 start() 会创建 QTimer，需要 QApplication 实例。"""
+        import os
+        os.environ["QT_QPA_PLATFORM"] = "offscreen"
+        from PySide6.QtWidgets import QApplication
+        if not QApplication.instance():
+            QApplication([])
+        yield
+
+    def test_not_started_returns_none(self, scheduler):
+        assert scheduler.seconds_until_next() is None
+
+    def test_manual_mode_returns_none(self, scheduler):
+        """manual 模式无定时器 → None。"""
+        scheduler.start()
+        assert scheduler.seconds_until_next() is None
+
+    def test_interval_running_returns_int_in_range(self, fake_library, fake_wm):
+        from src.core.scheduler import Scheduler
+        s = Scheduler(mode="interval_minutes", interval_minutes=30)
+        s.set_dependencies(fake_library, fake_wm)
+        s.start()
+        try:
+            v = s.seconds_until_next()
+            assert isinstance(v, int)
+            assert not isinstance(v, bool)
+            assert 0 <= v <= 30 * 60
+        finally:
+            s.stop()
+
+    def test_paused_returns_none(self, fake_library, fake_wm):
+        """暂停即冻结：pause() 后必须返回 None。"""
+        from src.core.scheduler import Scheduler
+        s = Scheduler(mode="interval_minutes", interval_minutes=5)
+        s.set_dependencies(fake_library, fake_wm)
+        s.start()
+        s.pause()
+        try:
+            assert s.seconds_until_next() is None
+        finally:
+            s.stop()
+
+    def test_stopped_returns_none(self, fake_library, fake_wm):
+        from src.core.scheduler import Scheduler
+        s = Scheduler(mode="interval_minutes", interval_minutes=5)
+        s.set_dependencies(fake_library, fake_wm)
+        s.start()
+        s.stop()
+        assert s.seconds_until_next() is None
+
+    def test_negative_remaining_treated_as_none(self, scheduler, monkeypatch):
+        """定时器 remainingTime() 返回 -1（未激活）时必须降级为 None，不能显示 0 秒。"""
+        scheduler._is_running = True
+        scheduler._is_paused = False
+
+        class _DeadTimer:
+            def remainingTime(self):
+                return -1
+
+        scheduler._timer = _DeadTimer()
+        assert scheduler.seconds_until_next() is None
