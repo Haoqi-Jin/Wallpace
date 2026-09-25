@@ -6,14 +6,49 @@
 
 import hashlib
 import logging
+import os
 import random
 from pathlib import Path
-from typing import Callable, List, Optional, Set
+from typing import Callable, Iterator, List, Optional, Set, Tuple
 
 logger = logging.getLogger(__name__)
 
 # 默认扩展名集合（小写）
-DEFAULT_EXTENSIONS: Set[str] = {"jpg", "jpeg", "png", "webp"}
+# 与 README 功能表保持一致（含 BMP/GIF）。GIF 动图由 QImageReader 读取首帧，
+# 作为缩略图/壁纸均可接受。
+DEFAULT_EXTENSIONS: Set[str] = {"jpg", "jpeg", "png", "webp", "bmp", "gif"}
+
+
+def _iter_image_files(root: Path, supported: Set[str]) -> Iterator[Path]:
+    """递归产出 root 下扩展名受支持的图片文件（已 resolve）。
+
+    这里用 `os.scandir` 手工递归，而不是 `root.rglob("*")`：
+    rglob 会为目录下**每一个**文件构造 Path 对象并 stat，再交给调用方用
+    suffix 过滤；一个包含 10 万个无关文件的目录就白付 10 万次开销。
+    scandir 的 DirEntry 在 Windows 上自带类型信息，可省掉额外 stat，
+    且我们在遍历时就丢弃无关条目，只对命中的图片做 resolve。
+    """
+    stack: List[str] = [str(root)]
+    while stack:
+        current = stack.pop()
+        try:
+            with os.scandir(current) as entries:
+                for entry in entries:
+                    try:
+                        if entry.is_dir(follow_symlinks=False):
+                            stack.append(entry.path)
+                        elif entry.is_file(follow_symlinks=False):
+                            name = entry.name
+                            dot = name.rfind(".")
+                            # dot > 0 同时排除了无扩展名文件与 `.hidden` 这类
+                            # 以点开头的文件（与旧实现 suffix 为空的行为一致）
+                            if dot > 0 and name[dot + 1:].lower() in supported:
+                                yield Path(entry.path).resolve()
+                    except OSError:
+                        # 单个条目不可读不应中断整个扫描
+                        continue
+        except OSError:
+            logger.warning("无法读取目录: %s", current)
 
 
 class ImageLibrary:
@@ -42,33 +77,43 @@ class ImageLibrary:
         )
         # 运行时状态
         self._all_images: List[str] = []  # scan() 的结果缓存
+        # 上次扫描时的目录 mtime 签名，用于增量扫描（None = 尚无有效签名）
+        self._last_scan_signature: Optional[Tuple[str, ...]] = None
         self._skip_set: Set[str] = set()   # 去重用
         self._favorite_set: Set[str] = set()
 
     # ==================== 公开 API ====================
 
-    def scan(self) -> List[str]:
+    def scan(self, force: bool = False) -> List[str]:
         """递归扫描所有配置的文件夹，返回可用图片路径。
 
-        结果按文件路径排序以保证可重复性。
-        会同步更新内置缓存 _all_images。
+        带增量检查：若所有目录（含子目录）的签名（目录条目数 + mtime）与上次
+        一致，说明期间没有文件增删，直接复用上次结果，省掉一次全量遍历。
+        注意签名以「条目数」为主判据 —— 仅凭 mtime 会因 Windows 时间戳量化
+        而漏掉同一 tick 内的增删（详见 ``_directory_signature`` 的说明）。
+
+        Args:
+            force: True 时跳过增量检查，强制全量重扫。
 
         Returns:
-            符合条件的图片绝对路径列表。
+            符合条件的图片绝对路径列表（已去重、排序）。
         """
-        images: List[str] = []
-        supported = self._extensions
+        signature = self._directory_signature()
+        if (
+            not force
+            and signature is not None
+            and signature == self._last_scan_signature
+        ):
+            logger.debug("目录未变化，复用上次扫描结果: %d 张", len(self._all_images))
+            return list(self._all_images)
 
+        images: List[str] = []
         for dir_str in self._directories:
             root = Path(dir_str)
             if not root.is_dir():
                 logger.warning("跳过无效目录: %s", dir_str)
                 continue
-            for path in root.rglob("*"):
-                if not path.is_file():
-                    continue
-                if path.suffix.lstrip(".").lower() in supported:
-                    images.append(str(path.resolve()))
+            images.extend(str(p) for p in _iter_image_files(root, self._extensions))
 
         # 去重 + 排序
         unique: List[str] = []
@@ -78,12 +123,69 @@ class ImageLibrary:
                 seen.add(img)
                 unique.append(img)
         self._all_images = unique
+        self._last_scan_signature = signature
         logger.info("扫描完成: %d 张图片", len(unique))
         return unique
 
-    def refresh(self) -> List[str]:
-        """快捷调用 scan + reload 的组合。"""
-        return self.scan()
+    def refresh(self, force: bool = False) -> List[str]:
+        """快捷调用 scan + reload 的组合。
+
+        Args:
+            force: True 时强制全量重扫（跳过增量检查）。
+        """
+        return self.scan(force=force)
+
+    def _directory_signature(self) -> Optional[Tuple[str, ...]]:
+        """采集所有配置目录（含子目录）的状态签名，用于增量扫描判断。
+
+        每个目录同时记录两项信息（拼成 ``路径|mtime_ns|条目数``）：
+
+        1. **条目数** —— 无条件可靠。目录内任何文件/子目录的增删都会立即改变
+           该目录的条目数，与文件系统时间戳精度无关。这是检测增删的**主**判据。
+        2. **mtime_ns** —— 用于捕捉「条目数不变但内容/名字变了」的边缘场景，
+           例如删除 ``a.jpg`` 后在同一目录又新建同名文件、或把文件改名等。
+
+        ⚠️ 为什么**不能只用 mtime**（历史坑，后人请勿"优化"回去）：
+            Windows 的 NTFS 文件时间戳按系统时钟 tick 量化，粒度约 15.6ms。
+            当「新建目录 → 立刻写入文件」发生在**同一个 tick 内**时，父目录与
+            被新建子目录的 mtime 完全不变，签名与上次相同，增量逻辑会误判
+            「目录未变化」而复用旧缓存，导致用户新加的图片不显示（漏扫）。
+            实测（Python 3.13 / Windows）：同一 tick 内 mkdir+写入，目录 mtime
+            Δ = 0 ns；延迟 5ms 后 Δ ≈ 7.3e6 ns，延迟 20ms 后 Δ ≈ 2.4e7 ns。
+            因此必须叠加「条目数」这一免疫时间戳量化的判据。
+
+        成本：本方法依旧**只对目录**做 scandir，并在同一次遍历中顺带累加条目数，
+        零额外系统调用 —— 快速路径的成本相比"只记 mtime"的版本没有增加。
+
+        Returns:
+            排序后的签名元组；只要有任何配置目录缺失/不可读就返回 None，
+            表示「无法安全增量」，调用方会退化为全量扫描（宁可多扫不漏扫）。
+        """
+        entries: List[str] = []
+        for dir_str in self._directories:
+            root = Path(dir_str)
+            if not root.is_dir():
+                return None
+            stack = [root]
+            while stack:
+                current = stack.pop()
+                try:
+                    count = 0
+                    with os.scandir(current) as it:
+                        for entry in it:
+                            count += 1
+                            try:
+                                if entry.is_dir(follow_symlinks=False):
+                                    stack.append(Path(entry.path))
+                            except OSError:
+                                continue
+                    # 条目数在遍历中免费得到，是检测增删的主判据；
+                    # mtime 追加用于捕捉条目数不变的场景。
+                    mtime_ns = current.stat().st_mtime_ns
+                    entries.append(f"{current}|{mtime_ns}|{count}")
+                except OSError:
+                    return None
+        return tuple(sorted(entries))
 
     def list_available(self) -> List[str]:
         """获取当前可用的图片列表（排除已跳过的）。

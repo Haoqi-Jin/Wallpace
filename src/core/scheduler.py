@@ -267,15 +267,25 @@ class Scheduler:
             self._start_interval_timer()
 
     def _pause_timers(self) -> None:
-        if self._timer is not None:
-            try:
-                self._timer.stop()
-                self._timer.deleteLater()
-            except RuntimeError:
-                # 对象已被删除，忽略
-                pass
-            finally:
-                self._timer = None
+        """停止并释放当前定时器（幂等、可重入安全）。
+
+        定时器可能已在 C++ 侧被 Qt 析构（例如事件循环已处理过 deleteLater），
+        此时 stop() 与 deleteLater() **都会**抛 RuntimeError，故一并纳入保护。
+        先把引用摘掉再操作，避免异常路径下留下悬空引用导致重复释放。
+        """
+        timer = self._timer
+        self._timer = None
+        if timer is None:
+            return
+        try:
+            timer.stop()
+            timer.deleteLater()
+        except RuntimeError:
+            # C++ 对象已被析构，无需（也无法）再操作
+            pass
+        except Exception:
+            # 兜底：不让清理路径的意外异常冒泡中断 stop()/pause() 流程
+            logger.warning("释放定时器时出现意外错误", exc_info=True)
 
     def _do_daily_timer(self) -> None:
         if self._library is None or self._wallpaper_manager is None:

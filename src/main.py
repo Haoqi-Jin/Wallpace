@@ -190,6 +190,14 @@ def main() -> None:
     if "--hidden" not in sys.argv:
         window.show()
 
+    # 平台能力提示：非 Windows 下壁纸设置不可用，必须在 UI 上明确告知
+    # （此前只记日志，打包后无控制台可看，用户会以为程序坏了）
+    if not wm.is_supported:
+        window.show_platform_warning(
+            "当前平台不支持设置系统壁纸（仅 Windows 可用），"
+            "「换一张」等切换操作将不会生效。"
+        )
+
     logger.info("Wallpace v%s 启动", __import__("src").__version__)
     logger.info(
         "配置: %d 个图片目录, %d 张扫描图片",

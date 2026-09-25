@@ -6,15 +6,19 @@
 
 import json
 import logging
+import os
 from pathlib import Path
 from typing import Any, List, Optional
 
 logger = logging.getLogger(__name__)
 
 # 默认配置常量
+# 注意：extensions 必须与 image_library.DEFAULT_EXTENSIONS 保持一致，
+# 否则新用户首次运行只会拿到旧的 4 种扩展名（Settings 的值会作为显式
+# extensions 传进 ImageLibrary，覆盖后者的默认值）。
 DEFAULT_CONFIG = {
     "image_directories": [],
-    "extensions": ["jpg", "jpeg", "png", "webp"],
+    "extensions": ["jpg", "jpeg", "png", "webp", "bmp", "gif"],
     "switch_mode": "daily_random",
     "daily_time": "08:00",
     "interval_minutes": None,
@@ -63,6 +67,7 @@ class Settings:
         self._using_default = config_path is None
         self.config_path = config_path or DEFAULT_CONFIG_PATH
         self._data: dict = {}
+        self._dirty = False  # 是否存在 defer 后尚未落盘的改动
         self.load()
 
     # ==================== 公开方法 ====================
@@ -134,19 +139,35 @@ class Settings:
         return False
 
     def save(self, data: Optional[dict] = None) -> None:
-        """持久化配置到磁盘。
+        """持久化配置到磁盘（原子写）。
+
+        先写同目录临时文件、fsync 落盘，再用 os.replace 原子替换正式文件。
+        这样即便写到一半崩溃/断电，也只会残留一个 .tmp，正式配置永远是
+        「上一份完整内容」—— 避免被截断成非法 JSON 导致用户的图片目录、
+        收藏、跳过列表整体丢失。
 
         Args:
             data: 要保存的配置字典；None 表示保存当前内存数据。
         """
         target = data if data is not None else self._data
+        tmp_path = self.config_path.with_name(self.config_path.name + ".tmp")
         try:
             self.config_path.parent.mkdir(parents=True, exist_ok=True)
-            with open(self.config_path, "w", encoding="utf-8") as f:
+            with open(tmp_path, "w", encoding="utf-8") as f:
                 json.dump(target, f, indent=2, ensure_ascii=False)
-            logger.info("配置已保存到 %s", self.config_path.name)
+                f.flush()
+                os.fsync(f.fileno())
+            os.replace(tmp_path, self.config_path)
+            self._dirty = False
+            logger.debug("配置已保存到 %s", self.config_path.name)
         except OSError as exc:
             logger.error("写入配置失败: %s", exc)
+            # 清理可能残留的临时文件，避免污染目录
+            try:
+                if tmp_path.exists():
+                    tmp_path.unlink()
+            except OSError:
+                pass
             raise RuntimeError(f"无法写入配置文件: {exc}") from exc
 
     def get(self, key: str, default: Any = None) -> Any:
@@ -161,24 +182,49 @@ class Settings:
         """
         return self._data.get(key, default)
 
-    def set(self, key: str, value: Any) -> None:
-        """设置一个配置项，同时写回磁盘。
+    def set(self, key: str, value: Any, *, defer: bool = False) -> None:
+        """设置一个配置项。
 
         Args:
             key: 配置键名。
             value: 新值。
+            defer: True 时只更新内存并标记「待落盘」，不立即写盘 —— 适合
+                连续修改多处配置的场景，改完后调用 flush() 一次性落盘。
+                默认 False，保持「设置即持久化」的既有语义。
+
+        Note:
+            使用 defer=True 后必须确保最终调用 flush()（或任意一次非 defer 的
+            set/save），否则改动只存在于内存中。
         """
         self._data[key] = value
+        if defer:
+            self._dirty = True
+            return
         self.save()
 
-    def set_many(self, mapping: dict) -> None:
+    def set_many(self, mapping: dict, *, defer: bool = False) -> None:
         """批量设置多个配置项，只触发一次磁盘写入。
 
         Args:
             mapping: 键值对字典。
+            defer: True 时只更新内存并标记待落盘，不写盘（见 set 的说明）。
         """
         self._data.update(mapping)
+        if defer:
+            self._dirty = True
+            return
         self.save()
+
+    def flush(self) -> bool:
+        """把延迟（defer）的修改落盘。
+
+        Returns:
+            True 表示确有改动被写入；False 表示没有待落盘的改动（空操作）。
+        """
+        if not self._dirty:
+            return False
+        self.save()
+        return True
 
     def reset_to_defaults(self) -> dict:
         """重置所有配置为出厂默认值，并立即保存。

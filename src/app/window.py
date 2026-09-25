@@ -247,6 +247,24 @@ class MainWindow(QMainWindow):
         self.setWindowIcon(create_app_icon(256))
         logger.info("主窗口初始化完成")
 
+    def show_platform_warning(self, message: str) -> None:
+        """在窗口顶部显示平台能力警告条（非阻塞、持续可见）。
+
+        用于把「当前平台不支持设置系统壁纸」这类致命但不足以阻止启动的问题
+        明确告知用户 —— 此前只在日志里记一条 error，打包成 --windowed 后用户
+        没有控制台可看，界面一切正常却点「换一张」静默失败。
+
+        Args:
+            message: 警告文案。
+        """
+        banner = getattr(self, "_platform_banner", None)
+        if banner is None:
+            logger.warning("%s", message)
+            return
+        banner.setText(f"⚠ {message}")
+        banner.setVisible(True)
+        logger.warning("已显示平台警告: %s", message)
+
     def _setup_ui(self) -> None:
         """构建所有 UI 组件。"""
         theme = ThemeManager()
@@ -327,6 +345,19 @@ class MainWindow(QMainWindow):
         vertical_layout.setContentsMargins(0, 0, 0, 0)
         vertical_layout.setSpacing(0)
         vertical_layout.addWidget(top_bar)
+
+        # === 平台能力警告条（默认隐藏；非 Windows 时由 main.py 调用 show_platform_warning）===
+        self._platform_banner = QLabel()
+        self._platform_banner.setObjectName("platform_banner")
+        self._platform_banner.setWordWrap(True)
+        self._platform_banner.setStyleSheet(
+            "background-color: #fff3cd; color: #8a6d3b;"
+            "border-bottom: 1px solid #ffeeba;"
+            "padding: 6px 16px; font-size: 12px;"
+        )
+        self._platform_banner.setVisible(False)
+        vertical_layout.addWidget(self._platform_banner)
+
         vertical_layout.addLayout(body_layout)
 
         # === Bottom status bar ===
@@ -688,8 +719,9 @@ class MainWindow(QMainWindow):
         reverse_mode_map = {v: k for k, v in mode_display_map.items()}
         internal_mode = reverse_mode_map.get(text, "daily_random")
 
-        # 保存模式到 settings
-        self._settings.set("switch_mode", internal_mode)
+        # 收集本次要持久化的字段，最后一次性落盘
+        # （原实现分两处 set，切到间隔模式时会写盘 2 次）
+        updates = {"switch_mode": internal_mode}
 
         # 如果是 interval_minutes 模式，从 settings 读取现有的间隔值
         if internal_mode == "interval_minutes":
@@ -701,7 +733,7 @@ class MainWindow(QMainWindow):
             # 配置变成 {switch_mode: "interval_minutes", interval_minutes: null}，
             # 下次启动 main.py 构造 Scheduler(interval_minutes=None) →
             # start() 抛 ValueError → 打包成 --windowed 后表现为"双击无反应退出"。
-            self._settings.set("interval_minutes", interval_val)
+            updates["interval_minutes"] = interval_val
             # 将已有的间隔值显示到输入框
             self._settings_page.set_interval_value(interval_val)
             # 同步调度器（走公开 setter，不再直写 _interval_minutes）
@@ -713,6 +745,9 @@ class MainWindow(QMainWindow):
             self._settings_page.set_interval_visible(True)
         else:
             self._settings_page.set_interval_visible(False)
+
+        # 单次落盘
+        self._settings.set_many(updates)
 
         # 管理调度器
         if self._scheduler is not None:
