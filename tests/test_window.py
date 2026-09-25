@@ -514,3 +514,119 @@ class TestMainWindowSettingsAutostart:
         assert main_window._settings.get("minimize_to_tray") is False
         main_window._on_minimize_toggled(True)
         assert main_window._settings.get("minimize_to_tray") is True
+
+
+class TestMultiMonitorWallpaper:
+    """#7 逐屏壁纸在 window 层的接线（用假 COM 替身，不依赖真实多屏）。"""
+
+    def test_toggle_disabled_when_unsupported(self, main_window):
+        """平台/COM 不支持时，逐屏开关应置灰且带 tooltip 原因。"""
+        wm = main_window._wallpaper_manager
+        if getattr(wm, "is_multi_monitor_supported", False):
+            pytest.skip("本机提供真实 IDesktopWallpaper，跳过置灰断言")
+        page = main_window._settings_page
+        assert page.per_monitor_check.isEnabled() is False
+        assert page.per_monitor_check.toolTip() != ""
+
+    def test_toggle_enabled_when_two_monitors(self, main_window):
+        """模拟 COM 可用且有 2 块显示器 → 开关启用且 tooltip 清空。"""
+        fake = MagicMock()
+        fake.is_multi_monitor_supported = True
+        fake.list_monitors.return_value = [{"id": "M1"}, {"id": "M2"}]
+        main_window._wallpaper_manager = fake
+
+        main_window._update_multi_monitor_availability()
+
+        page = main_window._settings_page
+        assert page.per_monitor_check.isEnabled() is True
+        assert page.per_monitor_check.toolTip() == ""
+
+    def test_toggle_disabled_when_com_unsupported(self, main_window):
+        """确定性覆盖置灰分支：COM 不支持 → 开关置灰 + tooltip 原因。"""
+        fake = MagicMock()
+        fake.is_multi_monitor_supported = False
+        main_window._wallpaper_manager = fake
+
+        main_window._update_multi_monitor_availability()
+
+        page = main_window._settings_page
+        assert page.per_monitor_check.isEnabled() is False
+        assert page.per_monitor_check.toolTip() != ""
+
+    def test_toggle_disabled_when_single_monitor(self, main_window):
+        """显示器数 < 2 时逐屏无意义 → 开关置灰（裁剪）。"""
+        fake = MagicMock()
+        fake.is_multi_monitor_supported = True
+        fake.list_monitors.return_value = [{"id": "M1"}]
+        main_window._wallpaper_manager = fake
+
+        main_window._update_multi_monitor_availability()
+
+        page = main_window._settings_page
+        assert page.per_monitor_check.isEnabled() is False
+
+    def test_build_map_distinct_when_enough_images(self, main_window, monkeypatch):
+        """图像充足时应为每块显示器分配互不相同的图片。"""
+        fake_lib = MagicMock()
+        fake_lib.list_available.return_value = ["a", "b", "c"]
+        main_window._library = fake_lib
+        fake_com = MagicMock()
+        fake_com.list_monitors.return_value = [{"id": "M1"}, {"id": "M2"}]
+        main_window._wallpaper_manager = fake_com
+
+        mapping = main_window._build_per_monitor_map()
+
+        assert set(mapping.keys()) == {"M1", "M2"}
+        assert len(set(mapping.values())) == 2  # 互不相同
+
+    def test_build_map_allows_repeats_when_short(self, main_window):
+        """可用图片不足显示器数时允许重复但不得报错。"""
+        fake_lib = MagicMock()
+        fake_lib.list_available.return_value = ["only"]
+        main_window._library = fake_lib
+        fake_com = MagicMock()
+        fake_com.list_monitors.return_value = [{"id": "M1"}, {"id": "M2"}]
+        main_window._wallpaper_manager = fake_com
+
+        mapping = main_window._build_per_monitor_map()
+
+        assert mapping == {"M1": "only", "M2": "only"}
+
+    def test_switch_per_monitor_calls_set_wallpapers_and_persists(self, main_window):
+        """逐屏切换应调用 set_wallpapers 并把映射落盘到 per_monitor_map。"""
+        fake_lib = MagicMock()
+        fake_lib.list_available.return_value = ["a", "b"]
+        main_window._library = fake_lib
+        fake_com = MagicMock()
+        fake_com.list_monitors.return_value = [{"id": "M1"}, {"id": "M2"}]
+        fake_com.set_wallpapers.return_value = True
+        main_window._wallpaper_manager = fake_com
+
+        assert main_window._switch_per_monitor() is True
+        assert fake_com.set_wallpapers.called
+        mapping = fake_com.set_wallpapers.call_args[0][0]
+        assert set(mapping.keys()) == {"M1", "M2"}
+        assert main_window._settings.get("per_monitor_map") == mapping
+
+    def test_handle_switch_warns_on_failure_not_silent(self, main_window):
+        """逐屏设置失败时必须显式告知用户（不再静默失败）。"""
+        main_window._scheduler = None  # 走 _handle_switch 的直接分支
+        main_window._settings.set("wallpaper_mode", "per_monitor")
+        fake_lib = MagicMock()
+        fake_lib.get_random.return_value = "a"
+        fake_lib.list_available.return_value = ["a", "b"]
+        main_window._library = fake_lib
+        fake_com = MagicMock()
+        fake_com.is_multi_monitor_supported = True
+        fake_com.list_monitors.return_value = [{"id": "M1"}, {"id": "M2"}]
+        fake_com.set_wallpapers.return_value = False  # 失败
+        main_window._wallpaper_manager = fake_com
+
+        warnings = []
+        main_window.show_platform_warning = lambda msg: warnings.append(msg)
+
+        main_window._handle_switch()
+
+        assert fake_com.set_wallpapers.called
+        assert warnings  # 明确暴露原因
+

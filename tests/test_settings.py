@@ -132,6 +132,44 @@ class TestSettingsCorruptedFile:
         assert s.get("switch_mode") == "daily_random"
 
 
+class TestWallpaperModeSettings:
+    """#7 逐屏壁纸：新增配置键的默认值、旧配置兼容、非法值回退。"""
+
+    def test_default_keys(self):
+        assert DEFAULT_CONFIG["wallpaper_mode"] == "unified"
+        assert DEFAULT_CONFIG["per_monitor_map"] == {}
+
+    def test_validate_accepts_new_keys(self):
+        assert Settings.validate(DEFAULT_CONFIG) == []
+
+    def test_old_config_without_new_keys_keeps_defaults(self, tmp_config_dir: Path):
+        """旧配置文件（无新键）加载后不丢键、不崩，新键取默认值。"""
+        config_path = tmp_config_dir / ".wallpace.json"
+        config_path.write_text('{"switch_mode": "manual"}', encoding="utf-8")
+        s = Settings(config_path=config_path)
+        assert s.get("switch_mode") == "manual"
+        assert s.get("wallpaper_mode") == "unified"
+        assert s.get("per_monitor_map") == {}
+
+    def test_invalid_values_fall_back_to_default(self, tmp_config_dir: Path):
+        config_path = tmp_config_dir / ".wallpace.json"
+        config_path.write_text(
+            '{"wallpaper_mode": "bogus", "per_monitor_map": []}',
+            encoding="utf-8",
+        )
+        s = Settings(config_path=config_path)
+        assert s.get("wallpaper_mode") == "unified"
+        assert s.get("per_monitor_map") == {}
+
+    def test_per_monitor_mode_round_trips(self, tmp_config_dir: Path):
+        s = Settings()
+        s.set("wallpaper_mode", "per_monitor")
+        s.set("per_monitor_map", {"M1": "D:/a.jpg"})
+        s2 = Settings(config_path=s.config_path)
+        assert s2.get("wallpaper_mode") == "per_monitor"
+        assert s2.get("per_monitor_map") == {"M1": "D:/a.jpg"}
+
+
 class TestLegacyMigrationPaths:
     """P0-4 附带修复：迁移路径必须同时覆盖两种历史拼写。
 

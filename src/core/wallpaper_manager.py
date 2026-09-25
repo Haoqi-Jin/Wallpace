@@ -9,7 +9,9 @@ import ctypes
 import logging
 import sys
 from pathlib import Path
-from typing import Optional
+from typing import Dict, List, Optional
+
+from src.core.desktop_wallpaper_com import DesktopWallpaperCOM
 
 # Windows 常量
 SPI_SETDESKWALLPAPER = 0x0014
@@ -29,6 +31,9 @@ class WallpaperManager:
     def __init__(self) -> None:
         """初始化壁纸管理器。"""
         self._is_windows = sys.platform == "win32"
+        # 逐屏壁纸用 COM 封装。注意：这里的构造**不触碰 COM**（惰性初始化），
+        # 因此非 Windows / 无桌面会话下也能安全构造本对象。
+        self._com = DesktopWallpaperCOM()
         if not self._is_windows:
             logger.warning("非 Windows 平台，壁纸设置将不可用")
 
@@ -79,6 +84,70 @@ class WallpaperManager:
         except OSError as exc:
             logger.error("调用 Windows API 出错: %s", exc)
             return False
+
+    def set_wallpapers(self, mapping: Dict[str, str]) -> bool:
+        """逐屏设置壁纸：``{monitor_id: image_path}``，key ``""`` 表示全部显示器。
+
+        全部成功返回 True；任一失败/异常都返回 False，并**回退为统一 SPI 设置**
+        （取 mapping 中任意一张图），保证用户至少能看到壁纸变化，而不是静默失败。
+
+        Args:
+            mapping: 显示器设备路径 → 图片绝对路径 的映射。
+
+        Returns:
+            是否全部设置成功；非 Windows / 空映射 / COM 不可用一律 False。
+        """
+        if not self._is_windows:
+            logger.warning("非 Windows 平台，无法设置逐屏壁纸")
+            return False
+        if not mapping:
+            logger.warning("逐屏映射为空，跳过")
+            return False
+
+        fallback = next(iter(mapping.values()), None)
+
+        # COM 不可用：直接降级为统一（整屏）SPI 设置。
+        if not self._com.is_available():
+            logger.warning("IDesktopWallpaper 不可用，逐屏壁纸降级为统一设置")
+            if fallback:
+                self.set_wallpaper(fallback)
+            return False
+
+        all_ok = True
+        try:
+            for monitor_id, image_path in mapping.items():
+                if not self._com.set_wallpaper(monitor_id, image_path):
+                    logger.warning("显示器 %r 设置壁纸失败", monitor_id)
+                    all_ok = False
+        except Exception:
+            # 兜底：COM 层理论上不抛，但防范任何底层异常冒泡到 UI。
+            logger.warning("逐屏壁纸设置异常，回退统一设置", exc_info=True)
+            all_ok = False
+
+        if not all_ok and fallback:
+            logger.warning("逐屏设置未全部成功，回退整屏 SPI 设置")
+            self.set_wallpaper(fallback)
+        return all_ok
+
+    def list_monitors(self) -> List[dict]:
+        """枚举系统显示器。
+
+        Returns:
+            ``[{"id": ..., "device_path": ...}, ...]``；非 Windows / COM 不可用时 []。
+        """
+        if not self._is_windows:
+            return []
+        return [
+            {"id": mon.id, "device_path": mon.device_path}
+            for mon in self._com.list_monitors()
+        ]
+
+    def release(self) -> None:
+        """释放底层 COM 资源（幂等）；非 Windows 下为空操作。
+
+        应在应用退出（``closeEvent``）时调用，避免 COM 对象泄漏。
+        """
+        self._com.release()
 
     def get_current_wallpaper(self) -> Optional[str]:
         """尝试读取当前系统壁纸路径。
@@ -139,3 +208,15 @@ class WallpaperManager:
     def is_supported(self) -> bool:
         """返回当前平台是否支持壁纸设置。"""
         return self._is_windows
+
+    @property
+    def is_multi_monitor_supported(self) -> bool:
+        """是否支持逐屏壁纸（Windows 且 ``IDesktopWallpaper`` COM 可用）。
+
+        注意：此属性只反映「COM 能力」；是否真的有多块显示器需另行检查
+        ``list_monitors()`` 的数量（UI 会同时要求 ``len(list_monitors()) >= 2``）。
+        惰性探测：非 Windows 直接 False，不触碰 COM。
+        """
+        if not self._is_windows:
+            return False
+        return self._com.is_available()

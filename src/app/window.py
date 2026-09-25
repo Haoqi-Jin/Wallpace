@@ -5,6 +5,7 @@
 """
 
 import logging
+import random
 from datetime import datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Optional
@@ -326,6 +327,9 @@ class MainWindow(QMainWindow):
         # ---- 页面 3: 设置面板 ----
         self._settings_page = self._build_settings_page()
         self._stacked.addWidget(self._settings_page)
+
+        # 按平台/COM/显示器数初始化「逐屏独立壁纸」开关的可用性
+        self._update_multi_monitor_availability()
 
         body_layout.addWidget(divider)
         body_layout.addWidget(self._stacked, stretch=1)
@@ -658,6 +662,7 @@ class MainWindow(QMainWindow):
             "on_remove_directory": self._remove_directory,
             "on_apply_interval": self._apply_interval,
             "on_remove_single_dir": self._remove_single_dir,
+            "on_wallpaper_mode_toggle": self._on_wallpaper_mode_toggled,
         }
         page = SettingsPage(settings=self._settings, callbacks=callbacks)
         self._settings_page = page
@@ -842,6 +847,18 @@ class MainWindow(QMainWindow):
             logger.warning("无法获取随机图片")
             return
 
+        # 逐屏模式：为每块显示器分配不同图片；失败已由 set_wallpapers 内部
+        # 回退为统一 SPI 设置并返回 False，这里把原因暴露给用户（不再静默失败）。
+        if self._is_per_monitor_mode():
+            if self._switch_per_monitor():
+                logger.info("逐屏壁纸切换成功")
+            else:
+                logger.error("逐屏壁纸设置失败（已回退统一设置）")
+                self.show_platform_warning(
+                    "逐屏壁纸设置失败，已回退为统一壁纸"
+                )
+            return
+
         success = self._wallpaper_manager.set_wallpaper(image_path)
         if success:
             available = self._library.list_available()
@@ -850,6 +867,91 @@ class MainWindow(QMainWindow):
             logger.info("壁纸切换成功: %s", image_path)
         else:
             logger.error("壁纸设置失败: %s", image_path)
+
+    # ===== 逐屏壁纸（#7）=====
+
+    def _is_per_monitor_mode(self) -> bool:
+        """当前配置是否为逐屏模式且平台/COM 支持。"""
+        if self._settings.get("wallpaper_mode", "unified") != "per_monitor":
+            return False
+        return bool(
+            getattr(self._wallpaper_manager, "is_multi_monitor_supported", False)
+        )
+
+    def _build_per_monitor_map(self) -> dict:
+        """为每块显示器各分配一张随机图片（尽量互不相同）。
+
+        Returns:
+            ``{monitor_id: image_path}``；无可用图片时返回 {}。
+            可用图片不足显示器数时允许重复（记 debug 日志，不报错）。
+        """
+        monitors = self._wallpaper_manager.list_monitors()
+        if not monitors:
+            return {}
+        available = self._library.list_available()
+        if not available:
+            return {}
+
+        monitor_ids = [m["id"] for m in monitors]
+        if len(available) >= len(monitor_ids):
+            chosen = random.sample(available, len(monitor_ids))
+        else:
+            logger.debug(
+                "可用图片(%d)少于显示器数(%d)，逐屏分配允许重复",
+                len(available),
+                len(monitor_ids),
+            )
+            chosen = [random.choice(available) for _ in monitor_ids]
+        return dict(zip(monitor_ids, chosen))
+
+    def _switch_per_monitor(self) -> bool:
+        """按逐屏模式为各显示器分配并设置壁纸，成功则落盘 per_monitor_map。"""
+        mapping = self._build_per_monitor_map()
+        if not mapping:
+            logger.warning("逐屏壁纸：无显示器或无可用图片")
+            return False
+        success = self._wallpaper_manager.set_wallpapers(mapping)
+        if success:
+            self._settings.set("per_monitor_map", mapping)
+        return success
+
+    def _update_multi_monitor_availability(self) -> None:
+        """按平台/COM/显示器数启用或置灰「逐屏独立壁纸」开关。"""
+        page = getattr(self, "_settings_page", None)
+        if page is None:
+            return
+        supported = False
+        monitor_count = 0
+        try:
+            supported = bool(
+                getattr(self._wallpaper_manager, "is_multi_monitor_supported", False)
+            )
+            if supported:
+                monitor_count = len(
+                    list(self._wallpaper_manager.list_monitors() or [])
+                )
+        except Exception:
+            logger.exception("探测逐屏壁纸能力失败")
+            supported, monitor_count = False, 0
+
+        if not supported:
+            reason = "当前系统不支持逐屏壁纸（需要 Windows 且 IDesktopWallpaper 可用）"
+        elif monitor_count < 2:
+            reason = "当前只检测到 1 块显示器，逐屏壁纸无意义"
+        else:
+            reason = ""
+        page.set_per_monitor_available(
+            supported and monitor_count >= 2, reason
+        )
+
+    def _on_wallpaper_mode_toggled(self, checked: bool) -> None:
+        """「逐屏独立壁纸」开关：保存模式；开启且可用时立即应用一次。"""
+        mode = "per_monitor" if checked else "unified"
+        self._settings.set("wallpaper_mode", mode)
+        logger.info("壁纸模式切换为: %s", mode)
+        if checked and self._is_per_monitor_mode():
+            if not self._switch_per_monitor():
+                self.show_platform_warning("逐屏壁纸应用失败，已回退为统一壁纸")
 
     def _persist_skip_favorites(self) -> None:
         """将当前 skip/favorites 集合批量写回配置（单次保存）。"""
@@ -902,6 +1004,10 @@ class MainWindow(QMainWindow):
             self._update_info_cards()
             self.update_top_status()
             self.update_bottom_bar()
+            # 逐屏模式：调度器走的是统一 set_wallpaper，这里补一次逐屏分配覆盖它，
+            # 使自动切换也能按显示器分配不同图片。
+            if self._is_per_monitor_mode():
+                self._switch_per_monitor()
         except Exception:
             logger.exception("更新 UI 失败")
 
@@ -1206,6 +1312,12 @@ class MainWindow(QMainWindow):
         if hasattr(self, "_watcher") and self._watcher is not None:
             # 停止 watchdog Observer 并 join，避免后台线程导致进程无法退出
             self._watcher.stop()
+        # 释放逐屏壁纸的 COM 对象，避免泄漏（幂等，非 Windows 下为空操作）
+        if getattr(self, "_wallpaper_manager", None) is not None:
+            try:
+                self._wallpaper_manager.release()
+            except Exception:
+                logger.exception("释放壁纸管理器 COM 资源失败")
         if hasattr(self, "_tray") and self._tray is not None:
             self._tray.setVisible(False)
             self._tray.deleteLater()

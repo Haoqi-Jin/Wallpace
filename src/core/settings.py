@@ -28,6 +28,9 @@ DEFAULT_CONFIG = {
     "auto_start": True,
     "minimize_to_tray": True,
     "log_level": "INFO",
+    # 逐屏壁纸（#7）：unified=所有显示器统一一张；per_monitor=每屏一张
+    "wallpaper_mode": "unified",
+    "per_monitor_map": {},
 }
 
 VALID_SWITCH_MODES = ("daily_random", "interval_minutes", "manual")
@@ -297,6 +300,13 @@ class Settings:
             "DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"
         ):
             errors.append("'log_level' 必须是合法日志级别")
+
+        # --- wallpaper_mode / per_monitor_map（#7 逐屏壁纸） ---
+        # 用带默认值的 get 查询，避免对"未含新键的旧配置/局部字典"误报错误。
+        if data.get("wallpaper_mode", "unified") not in ("unified", "per_monitor"):
+            errors.append("'wallpaper_mode' 必须为 unified 或 per_monitor")
+        if not isinstance(data.get("per_monitor_map", {}), dict):
+            errors.append("'per_monitor_map' 必须是字典")
 
         return errors
 

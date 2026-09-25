@@ -65,6 +65,11 @@ class SettingsPage(QWidget):
         """暴露最小化到托盘复选框，供 MainWindow / 测试访问。"""
         return self._minimize_check
 
+    @property
+    def per_monitor_check(self) -> QCheckBox:
+        """暴露「逐屏独立壁纸」复选框，供 MainWindow / 测试访问。"""
+        return self._per_monitor_check
+
     # ==================== 构建 ====================
 
     def _build_ui(self) -> None:
@@ -209,6 +214,17 @@ class SettingsPage(QWidget):
         self._minimize_check.toggled.connect(self._cb["on_minimize_toggle"])
         general_layout.addWidget(self._minimize_check)
 
+        # 逐屏独立壁纸（#7）：仅当平台支持且检测到 >=2 块显示器时才可用，
+        # 否则由 MainWindow 调用 set_per_monitor_available(False, 原因) 置灰。
+        self._per_monitor_check = QCheckBox("逐屏独立壁纸")
+        self._per_monitor_check.setChecked(
+            self._settings.get("wallpaper_mode", "unified") == "per_monitor"
+        )
+        self._per_monitor_check.toggled.connect(
+            self._cb["on_wallpaper_mode_toggle"]
+        )
+        general_layout.addWidget(self._per_monitor_check)
+
         layout.addWidget(group_general)
         layout.addStretch()
 
@@ -296,3 +312,18 @@ class SettingsPage(QWidget):
             self._mode_combo,
         ):
             w.setEnabled(enabled)
+
+    def set_per_monitor_available(self, available: bool, reason: str = "") -> None:
+        """设置「逐屏独立壁纸」开关的可用性。
+
+        不可用时置灰并给出 tooltip 说明原因（例如「当前系统不支持逐屏壁纸」），
+        避免做成"点了没反应"的死开关。
+
+        Args:
+            available: 是否可用。
+            reason: 不可用时的原因文案（可用时忽略）。
+        """
+        self._per_monitor_check.setEnabled(available)
+        self._per_monitor_check.setToolTip(
+            "" if available else (reason or "当前系统不支持逐屏壁纸")
+        )
