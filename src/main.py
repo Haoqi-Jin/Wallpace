@@ -190,6 +190,12 @@ def main() -> None:
     if "--hidden" not in sys.argv:
         window.show()
 
+    # G04：配置损坏时已在 Settings 内备份并重置，这里把警告显式告知用户
+    # （否则用户的目录/收藏丢失而毫无感知，打包后连日志都看不到）。
+    # 复用 #15 建好的 show_platform_warning 机制，不自造通知方式。
+    if getattr(settings, "load_warning", None):
+        window.show_platform_warning(settings.load_warning)
+
     # 平台能力提示：非 Windows 下壁纸设置不可用，必须在 UI 上明确告知
     # （此前只记日志，打包后无控制台可看，用户会以为程序坏了）
     if not wm.is_supported:

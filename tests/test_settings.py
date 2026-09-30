@@ -132,6 +132,48 @@ class TestSettingsCorruptedFile:
         assert s.get("switch_mode") == "daily_random"
 
 
+class TestCorruptConfigBackup:
+    """G04：配置损坏时先备份再重置，并通过 load_warning 暴露可读提示。"""
+
+    def test_corrupt_json_is_backed_up_and_reset(self, tmp_path: Path):
+        config_path = tmp_path / "config.json"
+        corrupt = "{not valid json!!! <损坏内容>"
+        config_path.write_text(corrupt, encoding="utf-8")
+
+        s = Settings(config_path=config_path)
+
+        # 重置为默认值
+        assert s.get("switch_mode") == DEFAULT_CONFIG["switch_mode"]
+        assert s.get("auto_start") == DEFAULT_CONFIG["auto_start"]
+        # 可读警告非空，且说明了备份去向
+        assert s.load_warning
+        assert "备份" in s.load_warning
+        # 备份文件存在，且内容与损坏前逐字节一致
+        backups = list(tmp_path.glob("config.json.corrupt-*"))
+        assert len(backups) == 1
+        assert backups[0].read_bytes() == corrupt.encode("utf-8")
+
+    def test_two_corruptions_produce_distinct_backups(self, tmp_path: Path):
+        config_path = tmp_path / "config.json"
+        config_path.write_text("{broken", encoding="utf-8")
+        Settings(config_path=config_path)  # 第一次损坏 → 备份 1
+        Settings(config_path=config_path)  # 文件仍损坏 → 备份 2（不得覆盖）
+
+        backups = sorted(p.name for p in tmp_path.glob("config.json.corrupt-*"))
+        assert len(backups) == 2
+        assert backups[0] != backups[1]
+
+    def test_valid_config_has_no_warning_or_backup(self, tmp_path: Path):
+        config_path = tmp_path / "config.json"
+        config_path.write_text('{"switch_mode": "manual"}', encoding="utf-8")
+
+        s = Settings(config_path=config_path)
+
+        # 合法配置：无警告、无备份（防误报）
+        assert s.load_warning is None
+        assert list(tmp_path.glob("config.json.corrupt-*")) == []
+
+
 class TestWallpaperModeSettings:
     """#7 逐屏壁纸：新增配置键的默认值、旧配置兼容、非法值回退。"""
 

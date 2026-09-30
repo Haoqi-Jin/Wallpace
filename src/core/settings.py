@@ -7,6 +7,8 @@
 import json
 import logging
 import os
+import shutil
+from datetime import datetime
 from pathlib import Path
 from typing import Any, List, Optional
 
@@ -74,6 +76,8 @@ class Settings:
         self.config_path = config_path or DEFAULT_CONFIG_PATH
         self._data: dict = {}
         self._dirty = False  # 是否存在 defer 后尚未落盘的改动
+        # G04：加载异常（配置损坏已备份/重置）时的可读提示；正常加载时为 None。
+        self.load_warning: Optional[str] = None
         self.load()
 
     # ==================== 公开方法 ====================
@@ -88,6 +92,8 @@ class Settings:
         Returns:
             当前配置的字典。
         """
+        # 每次加载先清空警告：正常加载不得残留上一次损坏的提示（防误报）。
+        self.load_warning = None
         try:
             if self.config_path.exists():
                 with open(self.config_path, "r", encoding="utf-8") as f:
@@ -110,11 +116,11 @@ class Settings:
                     self._data = dict(DEFAULT_CONFIG)
                     logger.info("配置文件不存在，使用默认配置")
         except json.JSONDecodeError as exc:
-            logger.error("配置文件格式错误: %s，使用默认配置", exc)
-            self._data = dict(DEFAULT_CONFIG)
+            logger.error("配置文件格式错误: %s", exc)
+            self._recover_from_corruption("文件格式错误")
         except OSError as exc:
             logger.error("无法读取配置文件: %s", exc)
-            self._data = dict(DEFAULT_CONFIG)
+            self._recover_from_corruption("文件无法读取")
         return self._data
 
     def _try_migrate(self) -> bool:
@@ -314,6 +320,60 @@ class Settings:
         return errors
 
     # ==================== 私有方法 ====================
+
+    def _recover_from_corruption(self, reason: str) -> None:
+        """配置损坏时的恢复：先备份原文件，再重置默认值并记录可读警告（G04）。
+
+        原行为只把 ``_data`` 重置为默认值并 ``logger.warning`` 一行——用户的
+        目录列表/收藏/跳过列表全部丢失，打包成 ``--windowed`` 后连日志都看不到。
+        现在把损坏文件备份下来（可人工找回），并通过 ``load_warning`` 暴露给
+        UI（由 ``main.py`` 复用 #15 的 ``show_platform_warning`` 展示）。
+        """
+        backup = self._backup_corrupt_config()
+        self._data = dict(DEFAULT_CONFIG)
+        if backup is not None:
+            self.load_warning = (
+                f"配置文件已损坏（{reason}），原文件已备份到 {backup}，"
+                "并已重置为默认配置。"
+            )
+        else:
+            self.load_warning = (
+                f"配置文件已损坏（{reason}），且备份失败，已重置为默认配置。"
+            )
+        logger.warning("%s", self.load_warning)
+
+    def _backup_corrupt_config(self) -> Optional[Path]:
+        """把损坏的配置文件备份为 ``config.json.corrupt-YYYYMMDD-HHMMSS``。
+
+        - 内容与原文件逐字节一致（``shutil.copy2``）。
+        - 同一秒内多次损坏时追加 ``-1``/``-2`` 后缀，保证互不覆盖。
+        - 备份失败**返回 None 而不抛出**，调用方继续走重置逻辑（宁可丢备份，
+          也不能因备份失败让程序起不来）。
+
+        Returns:
+            备份文件路径；失败时为 None。
+        """
+        timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+        base = self.config_path.with_name(
+            f"{self.config_path.name}.corrupt-{timestamp}"
+        )
+        dest = base
+        counter = 1
+        while dest.exists():
+            dest = base.with_name(f"{base.name}-{counter}")
+            counter += 1
+        try:
+            self.config_path.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(self.config_path, dest)
+            logger.warning("已备份损坏的配置文件到 %s", dest)
+            return dest
+        except OSError as exc:
+            logger.error(
+                "备份损坏配置失败(%s)，将继续重置为默认值: %s",
+                self.config_path,
+                exc,
+            )
+            return None
 
     def _merge_with_defaults(self, partial: dict) -> dict:
         """用默认值修复 partial 中无效的字段。
