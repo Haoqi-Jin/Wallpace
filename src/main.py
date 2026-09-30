@@ -172,7 +172,10 @@ def main() -> None:
     from src.core.autostart_registry import AutostartManager
 
     mgr = AutostartManager()
-    want = settings.get("auto_start", True)
+    # 兜底默认值必须是 False：与 DEFAULT_CONFIG 一致。若配置缺该键（老版本
+    # 配置/手改配置），True 会悄悄恢复"首启静默写注册表"这个已被 G03 修掉的
+    # 行为 —— 典型的"兜底值把修复吃掉"回归。
+    want = settings.get("auto_start", False)
     if want and not mgr.is_enabled:
         mgr.enable()
     elif not want and mgr.is_enabled:
