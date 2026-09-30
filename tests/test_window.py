@@ -766,4 +766,130 @@ class TestSchedulerWallpaperApplierWiring:
         fake_wm.set_wallpaper.assert_not_called()  # 无双写
 
 
+class TestPerMonitorStartupRestore:
+    """G10：启动时恢复已保存的逐屏分配（含有效性过滤，不照读照设）。"""
+
+    @staticmethod
+    def _make_fake(monitors):
+        """构造支持逐屏的假 COM 替身。"""
+        fake = MagicMock()
+        fake.is_multi_monitor_supported = True
+        fake.list_monitors.return_value = list(monitors)
+        fake.set_wallpapers.return_value = True
+        return fake
+
+    def test_matching_map_applied_without_random(
+        self, main_window, tmp_path, monkeypatch
+    ):
+        """保存的 map 与当前显示器完全匹配且文件存在 → 直接应用，不走随机。"""
+        img1 = tmp_path / "a.jpg"
+        img2 = tmp_path / "b.jpg"
+        img1.write_text("x", encoding="utf-8")
+        img2.write_text("x", encoding="utf-8")
+
+        main_window._settings.set("wallpaper_mode", "per_monitor")
+        main_window._settings.set(
+            "per_monitor_map", {"M1": str(img1), "M2": str(img2)}
+        )
+        fake = self._make_fake([{"id": "M1"}, {"id": "M2"}])
+        main_window._wallpaper_manager = fake
+
+        random_calls = {"n": 0}
+
+        def _fake_build():
+            random_calls["n"] += 1
+            return {"M1": "random.jpg"}
+
+        monkeypatch.setattr(main_window, "_build_per_monitor_map", _fake_build)
+
+        main_window._restore_per_monitor_wallpapers()
+
+        fake.set_wallpapers.assert_called_once_with(
+            {"M1": str(img1), "M2": str(img2)}
+        )
+        assert random_calls["n"] == 0  # 未走随机分配
+
+    def test_unknown_monitor_id_dropped_and_written_back(
+        self, main_window, tmp_path
+    ):
+        """map 含当前不存在的 monitor id → 丢弃该条，其余保留并写回清理结果。"""
+        img1 = tmp_path / "a.jpg"
+        img1.write_text("x", encoding="utf-8")
+
+        main_window._settings.set("wallpaper_mode", "per_monitor")
+        main_window._settings.set(
+            "per_monitor_map", {"M1": str(img1), "MX": "whatever.jpg"}
+        )
+        fake = self._make_fake([{"id": "M1"}])
+        main_window._wallpaper_manager = fake
+
+        main_window._restore_per_monitor_wallpapers()
+
+        fake.set_wallpapers.assert_called_once_with({"M1": str(img1)})
+        assert main_window._settings.get("per_monitor_map") == {"M1": str(img1)}
+
+    def test_missing_image_dropped(self, main_window, tmp_path):
+        """map 里的图片文件已被删除 → 丢弃该条，其余保留。"""
+        img1 = tmp_path / "a.jpg"
+        img1.write_text("x", encoding="utf-8")
+
+        main_window._settings.set("wallpaper_mode", "per_monitor")
+        main_window._settings.set(
+            "per_monitor_map",
+            {"M1": str(img1), "M2": str(tmp_path / "gone.jpg")},
+        )
+        fake = self._make_fake([{"id": "M1"}, {"id": "M2"}])
+        main_window._wallpaper_manager = fake
+
+        main_window._restore_per_monitor_wallpapers()
+
+        fake.set_wallpapers.assert_called_once_with({"M1": str(img1)})
+
+    def test_all_invalid_falls_back_to_random(
+        self, main_window, tmp_path, monkeypatch
+    ):
+        """过滤后为空 → 回退随机分配（断言确实走了随机路径）。"""
+        main_window._settings.set("wallpaper_mode", "per_monitor")
+        main_window._settings.set(
+            "per_monitor_map", {"M1": str(tmp_path / "gone.jpg")}
+        )
+        fake = self._make_fake([{"id": "M1"}])
+        main_window._wallpaper_manager = fake
+
+        random_calls = {"n": 0}
+
+        def _fake_build():
+            random_calls["n"] += 1
+            return {"M1": "random.jpg"}
+
+        monkeypatch.setattr(main_window, "_build_per_monitor_map", _fake_build)
+
+        main_window._restore_per_monitor_wallpapers()
+
+        assert random_calls["n"] == 1  # 走了随机回退
+        fake.set_wallpapers.assert_called_once_with({"M1": "random.jpg"})
+
+    def test_unified_mode_does_not_read_or_apply(self, main_window, monkeypatch):
+        """非逐屏模式 → 完全不读取、不应用 per_monitor_map（防误触发）。"""
+        main_window._settings.set("wallpaper_mode", "unified")
+        main_window._settings.set("per_monitor_map", {"M1": "whatever.jpg"})
+        fake = self._make_fake([{"id": "M1"}])
+        main_window._wallpaper_manager = fake
+
+        queried = []
+        real_get = main_window._settings.get
+
+        def _spy_get(key, default=None):
+            queried.append(key)
+            return real_get(key, default)
+
+        monkeypatch.setattr(main_window._settings, "get", _spy_get)
+
+        main_window._restore_per_monitor_wallpapers()
+
+        assert "per_monitor_map" not in queried  # 根本没读该键
+        fake.set_wallpapers.assert_not_called()
+
+
+
 

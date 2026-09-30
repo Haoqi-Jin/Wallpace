@@ -151,6 +151,9 @@ class MainWindow(QMainWindow):
         )
         self._start_clock_timer()
 
+        # G10：启动时恢复已保存的逐屏分配（仅逐屏模式 + COM 支持时；不阻塞启动）
+        self._restore_per_monitor_wallpapers()
+
     def _setup_window(self) -> None:
         """窗口基本属性。"""
         self.setWindowTitle("Wallpace")
@@ -718,6 +721,66 @@ class MainWindow(QMainWindow):
         if success:
             self._settings.set("per_monitor_map", mapping)
         return success
+
+    def _restore_per_monitor_wallpapers(self) -> None:
+        """启动时恢复已保存的逐屏分配（G10）。
+
+        原缺陷：``per_monitor_map`` 只有写入点、没有任何读取点，用户为每块屏
+        配好的图重启即丢。这里在启动时恢复，并做**有效性过滤**（不是照读照设）：
+
+        - monitor id 已不在当前 ``list_monitors()`` 中 → 丢弃（显示器拔了/换了）；
+        - 图片路径已不存在 → 丢弃；
+        - 过滤后仍有有效条目 → 直接应用（**不再随机**）；
+        - 过滤后为空 → 回退到原有随机分配逻辑。
+
+        仅在逐屏模式且平台/COM 支持时才执行（``_is_per_monitor_mode`` 已含两重
+        判断），因此非逐屏模式既**不读取**也不应用 ``per_monitor_map``。任何异常
+        都不得影响正常启动（惰性 COM 不可用时安全跳过）。
+        """
+        try:
+            if not self._is_per_monitor_mode():
+                return  # 非逐屏模式 / COM 不支持：不读取、不应用
+            saved = self._settings.get("per_monitor_map", {}) or {}
+            if not isinstance(saved, dict) or not saved:
+                return
+
+            monitors = self._wallpaper_manager.list_monitors() or []
+            valid_ids = {
+                m.get("id") for m in monitors if isinstance(m, dict)
+            }
+
+            cleaned: dict = {}
+            for monitor_id, image_path in saved.items():
+                if monitor_id not in valid_ids:
+                    logger.info(
+                        "逐屏恢复：显示器 %s 当前不存在，丢弃该条", monitor_id
+                    )
+                    continue
+                if not isinstance(image_path, str) or not Path(image_path).exists():
+                    logger.info(
+                        "逐屏恢复：图片 %s 不存在，丢弃该条", image_path
+                    )
+                    continue
+                cleaned[monitor_id] = image_path
+
+            dropped = len(saved) - len(cleaned)
+            if dropped:
+                logger.info("逐屏恢复：清理 %d 条无效分配", dropped)
+                try:
+                    self._settings.set("per_monitor_map", cleaned)
+                except Exception:
+                    logger.exception("逐屏恢复：写回清理结果失败")
+
+            if cleaned:
+                if self._wallpaper_manager.set_wallpapers(cleaned):
+                    logger.info("逐屏恢复：已应用保存的 %d 条分配", len(cleaned))
+                else:
+                    logger.warning("逐屏恢复：应用保存的分配失败")
+            else:
+                logger.info("逐屏恢复：无有效分配，回退随机分配")
+                self._switch_per_monitor()
+        except Exception:
+            logger.exception("恢复逐屏壁纸分配失败，忽略（不影响启动）")
 
     def _apply_wallpaper_for_mode(self, image_path: str) -> bool:
         """调度器设置壁纸的分流器（注入给 Scheduler.set_wallpaper_applier）。
