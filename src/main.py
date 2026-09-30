@@ -126,6 +126,18 @@ def main() -> None:
     app.setApplicationName("Wallpace")
     app.setOrganizationName("wallpace")
 
+    # G01：单实例保护。必须在创建 MainWindow（及其调度器/目录监听/托盘）之前，
+    # 否则第二实例会先建好窗口再退出，出现"窗口闪一下"甚至短暂抢设壁纸。
+    # 所有失败路径都降级为"允许启动"（见 SingleInstanceGuard），绝不阻断用户。
+    from src.core.single_instance import SingleInstanceGuard
+
+    guard = SingleInstanceGuard()
+    if not guard.try_acquire():
+        # 已有实例在运行：请求它把窗口拉到前台，然后静默退出（退出码 0）。
+        guard.notify_existing()
+        print("Wallpace 已在运行，已请求激活已有窗口。")
+        sys.exit(0)
+
     # Phase 1: 核心模块初始化
     from src.core.settings import Settings
     from src.core.image_library import ImageLibrary
@@ -190,6 +202,8 @@ def main() -> None:
         wallpaper_manager=wm,
         scheduler=scheduler,
     )
+    # G01：作为首实例，收到第二实例的 activate 消息时把主窗口拉到前台。
+    guard.set_activate_callback(window.bring_to_front)
     if "--hidden" not in sys.argv:
         window.show()
 

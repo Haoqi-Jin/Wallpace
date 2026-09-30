@@ -180,6 +180,27 @@ class MainWindow(QMainWindow):
         banner.setVisible(True)
         logger.warning("已显示平台警告: %s", message)
 
+    def bring_to_front(self) -> None:
+        """把主窗口恢复到前台（单实例保护：第二个实例请求激活时调用）。
+
+        场景：用户重复双击图标/重复触发开机自启，第二个进程检测到已有实例，
+        发来 ``activate`` 消息。首实例收到后应把窗口拉到最前，而不是毫无反应。
+
+        同时同步托盘：若窗口此前最小化到托盘（隐藏），这里把它重新显示出来。
+        任何异常都只记日志，绝不能因"恢复前台"失败而影响正在运行的实例。
+        """
+        try:
+            self.showNormal()
+            self.raise_()
+            self.activateWindow()
+            tray = getattr(self, "_tray", None)
+            if tray is not None:
+                tray.show()
+                tray.setVisible(True)
+            logger.info("已恢复主窗口到前台（响应第二实例激活请求）")
+        except Exception:  # noqa: BLE001 —— 恢复前台失败不影响实例运行
+            logger.exception("恢复主窗口到前台失败")
+
     def _setup_ui(self) -> None:
         """构建所有 UI 组件。"""
         theme = ThemeManager()
