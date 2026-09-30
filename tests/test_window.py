@@ -474,8 +474,9 @@ class TestMainWindowSettingsAutostart:
         """设置页应含“开机自启”与“关闭窗口时最小化到托盘”复选框。"""
         assert hasattr(main_window, "_autostart_check")
         assert hasattr(main_window, "_minimize_check")
-        # 默认开启 -> 复选框勾选
-        assert main_window._autostart_check.isChecked() is True
+        # G03：开机自启默认关闭（不再首启静默写注册表）→ 复选框未勾选
+        # 最小化到托盘仍默认开启 → 勾选
+        assert main_window._autostart_check.isChecked() is False
         assert main_window._minimize_check.isChecked() is True
 
     def test_autostart_toggle_enables(

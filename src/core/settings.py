@@ -25,7 +25,10 @@ DEFAULT_CONFIG = {
     "skip_list": [],
     "favorites": [],
     "enable_notifications": True,
-    "auto_start": True,
+    # G03：默认**关闭**开机自启 —— 首启不静默写注册表（用户未授权）。
+    # 只改默认值；_merge_with_defaults 会让用户配置里的 true 覆盖默认，
+    # 故老用户显式开启过的设置不受影响。
+    "auto_start": False,
     "minimize_to_tray": True,
     "log_level": "INFO",
     # 逐屏壁纸（#7）：unified=所有显示器统一一张；per_monitor=每屏一张

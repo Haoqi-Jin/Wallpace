@@ -170,6 +170,32 @@ class TestWallpaperModeSettings:
         assert s2.get("per_monitor_map") == {"M1": "D:/a.jpg"}
 
 
+class TestAutoStartDefault:
+    """G03：开机自启默认关闭（不再首启静默写注册表）。
+
+    只改默认值；必须确保已有用户配置里的 ``auto_start: true`` 继续生效
+    （由 ``_merge_with_defaults`` 的"用户配置覆盖默认值"语义保证）。
+    """
+
+    def test_default_config_disables_auto_start(self):
+        """默认配置项本身必须为 False。"""
+        assert DEFAULT_CONFIG["auto_start"] is False
+
+    def test_existing_true_is_preserved(self, tmp_path: Path):
+        """迁移安全护栏：老用户显式写过的 true 不能被新默认值冲掉。"""
+        config_path = tmp_path / "config.json"
+        config_path.write_text('{"auto_start": true}', encoding="utf-8")
+
+        s = Settings(config_path=config_path)
+
+        assert s.get("auto_start") is True
+
+    def test_absent_config_file_defaults_to_false(self, tmp_path: Path):
+        """全新安装（无配置文件）→ 默认 False。"""
+        s = Settings(config_path=tmp_path / "missing.json")
+        assert s.get("auto_start") is False
+
+
 class TestLegacyMigrationPaths:
     """P0-4 附带修复：迁移路径必须同时覆盖两种历史拼写。
 
