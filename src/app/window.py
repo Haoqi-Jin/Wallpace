@@ -17,15 +17,14 @@ from PySide6.QtCore import (
 )
 from PySide6.QtGui import QIcon
 from PySide6.QtWidgets import (
-    QCheckBox,
-    QComboBox,
+    # QFileDialog 的业务调用已迁至 SettingsController，但此处**保留导入**：
+    # 既有测试以 "src.app.window.QFileDialog.getExistingDirectory" 为 monkeypatch
+    # 锚点（作用于共享的类对象，迁移后仍生效），移除导入会使该锚点解析失败。
     QFileDialog,
-    QLineEdit,
     QFrame,
     QHBoxLayout,
     QLabel,
     QMainWindow,
-    QPushButton,
     QStackedWidget,
     QVBoxLayout,
     QWidget,
@@ -54,6 +53,7 @@ from src.app.widgets.preview_card import PreviewCardWidget
 from src.app.icon import create_app_icon
 from src.app import image_loader
 from src.app.scan_controller import ScanController
+from src.app.settings_controller import SettingsController
 from src.app.widgets.gallery_strip import GalleryStrip
 from src.core.autostart_registry import AutostartManager
 from src.app.pages.gallery_page import GalleryPage
@@ -131,6 +131,24 @@ class MainWindow(QMainWindow):
 
         self._setup_window()
         self._setup_ui()
+        # 设置页业务逻辑控制器（#1：7 个回调方法已提取，facade 转发；需在
+        # _setup_ui 之后创建以便拿到 settings_page）。scheduler / 扫描状态用
+        # provider 延迟求值，兼容既有测试对 main_window._scheduler 的重赋值；
+        # AutostartManager 用 lambda 工厂延迟解析，使 src.app.window 上的
+        # monkeypatch 生效。
+        self._settings_ctrl = SettingsController(
+            settings=self._settings,
+            library=self._library,
+            scheduler_provider=lambda: self._scheduler,
+            settings_page=self._settings_page,
+            wallpaper_manager=self._wallpaper_manager,
+            scan_state=lambda: self._scan_running,
+            refresh_gallery=lambda: self._refresh_gallery(),
+            refresh_status=self._refresh_status,
+            set_watcher_directories=lambda dirs: self._watcher.set_directories(dirs),
+            on_switch=self.on_wallpaper_switched,
+            autostart_manager_factory=lambda: AutostartManager(),
+        )
         self._start_clock_timer()
 
     def _setup_window(self) -> None:
@@ -585,168 +603,40 @@ class MainWindow(QMainWindow):
         self._minimize_check = page.minimize_check
         return page
 
-    # ===== 设置页面的辅助方法 =====
+    # ===== 设置页面的辅助方法（#1：业务逻辑委托给 SettingsController）=====
 
     def _on_autostart_toggled(self, checked: bool) -> None:
-        """“开机自启”开关：保存设置并同步注册表（经 AutostartManager）。"""
-        self._settings.set("auto_start", bool(checked))
-        if checked:
-            AutostartManager().enable()
-        else:
-            AutostartManager().disable()
+        """“开机自启”开关（委托 SettingsController）。"""
+        self._settings_ctrl.on_autostart_toggled(checked)
 
     def _on_minimize_toggled(self, checked: bool) -> None:
-        """“关闭窗口时最小化到托盘”开关：仅保存设置。"""
-        self._settings.set("minimize_to_tray", bool(checked))
-
-    # ===== 设置页面的辅助方法 =====
+        """“关闭窗口时最小化到托盘”开关（委托 SettingsController）。"""
+        self._settings_ctrl.on_minimize_toggled(checked)
 
     def _add_directory(self) -> None:
-        """打开文件夹选择对话框，添加到图片目录列表。"""
-        if self._scan_running:
-            # 扫描进行中禁止变更目录，避免扫描结果过期
-            return
-        folder = QFileDialog.getExistingDirectory(
-            self, "选择图片文件夹", ""
-        )
-        if folder:
-            dirs = self._settings.get("image_directories", [])
-            if folder not in dirs:
-                dirs.append(folder)
-                self._settings.set("image_directories", dirs)
-            # 关键修复：只将目录添加到 ImageLibrary，避免重复同步扫描。
-            if self._library.add_directory(folder, scan=False):
-                self._refresh_gallery()
-                self._settings_page.refresh()
-                self._watcher.set_directories(
-                    self._settings.get("image_directories", [])
-                )
-                logger.info("已添加图片目录: %s", folder)
-            else:
-                logger.warning("添加图片目录失败（目录无效）: %s", folder)
+        """打开文件夹选择对话框并添加目录（委托 SettingsController）。"""
+        self._settings_ctrl.add_directory()
 
     def _on_mode_changed(self, text: str) -> None:
-        """处理模式切换。"""
-        if self._scan_running:
-            # 扫描进行中模式选择器已被禁用，此分支仅是双保险
-            return
-        mode_display_map = {
-            "daily_random": "每日随机",
-            "interval_minutes": "间隔时间",
-            "manual": "手动",
-        }
-        reverse_mode_map = {v: k for k, v in mode_display_map.items()}
-        internal_mode = reverse_mode_map.get(text, "daily_random")
-
-        # 收集本次要持久化的字段，最后一次性落盘
-        # （原实现分两处 set，切到间隔模式时会写盘 2 次）
-        updates = {"switch_mode": internal_mode}
-
-        # 如果是 interval_minutes 模式，从 settings 读取现有的间隔值
-        if internal_mode == "interval_minutes":
-            interval_val = self._settings.get("interval_minutes", 60)
-            if not isinstance(interval_val, int) or interval_val <= 0:
-                interval_val = 60
-            # 关键修复（P0-2）：兜底值必须写回配置。
-            # 早期实现只把兜底值给了 UI 和 scheduler，唯独没持久化，于是
-            # 配置变成 {switch_mode: "interval_minutes", interval_minutes: null}，
-            # 下次启动 main.py 构造 Scheduler(interval_minutes=None) →
-            # start() 抛 ValueError → 打包成 --windowed 后表现为"双击无反应退出"。
-            updates["interval_minutes"] = interval_val
-            # 将已有的间隔值显示到输入框
-            self._settings_page.set_interval_value(interval_val)
-            # 同步调度器（走公开 setter，不再直写 _interval_minutes）
-            if self._scheduler is not None:
-                try:
-                    self._scheduler.set_interval_minutes(interval_val)
-                except ValueError as exc:
-                    logger.warning("同步间隔时间到调度器失败: %s", exc)
-            self._settings_page.set_interval_visible(True)
-        else:
-            self._settings_page.set_interval_visible(False)
-
-        # 单次落盘
-        self._settings.set_many(updates)
-
-        # 管理调度器
-        if self._scheduler is not None:
-            if self._scheduler.is_running:
-                self._scheduler.stop()
-            self._scheduler.mode = internal_mode
-            if internal_mode != "manual" and not self._scheduler.is_running:
-                # 兜底：任何调度器异常都不能让设置页交互中断（P0-2 同源防护）
-                try:
-                    self._scheduler.start(on_switch=self.on_wallpaper_switched)
-                except ValueError as exc:
-                    logger.error("调度器启动失败，已降级为手动模式: %s", exc)
-                    self._scheduler.mode = "manual"
-                    self._scheduler.start(on_switch=self.on_wallpaper_switched)
-
-        self._settings_page.update_mode_description(internal_mode)
-        self._settings_page.refresh()
+        """处理模式切换（委托 SettingsController）。"""
+        self._settings_ctrl.on_mode_changed(text)
 
     def _apply_interval(self) -> None:
-        """应用间隔时间设置。"""
-        try:
-            interval_val_str = self._settings_page.get_interval_text()
-            if not interval_val_str:
-                logger.warning("请输入间隔时间")
-                return
-            interval_val = int(interval_val_str)
-            if interval_val <= 0:
-                logger.warning("间隔时间必须为正数")
-                return
-            self._settings.set("interval_minutes", interval_val)
-            if self._scheduler is not None:
-                # 走公开 setter：间隔模式运行中会立即重建定时器；暂停态下
-                # 定时器本来就是停的，resume() 时会用新值重建（保持暂停语义，
-                # 不再像旧实现那样 stop/start 把暂停状态清掉）。
-                self._scheduler.set_interval_minutes(interval_val)
-            logger.info("间隔时间已应用: %d 分钟", interval_val)
-            self._update_info_cards()
-            self.update_top_status()
-        except ValueError:
-            logger.warning("间隔时间格式无效，请输入数字")
+        """应用间隔时间设置（委托 SettingsController）。"""
+        self._settings_ctrl.apply_interval()
 
     def _remove_directory(self) -> None:
-        """弹出选择框，让用户选择移除哪个文件夹。"""
-        if self._scan_running:
-            return
-        dirs = self._settings.get("image_directories", [])
-        if not dirs:
-            return
-        # 如果有多个目录，用简易方式：移除最后一个
-        removed = dirs.pop()
-        self._settings.set("image_directories", dirs)
-        self._library.remove_directory(removed, scan=False)
-        self._refresh_gallery()
-        self._settings_page.refresh()
-        self._watcher.set_directories(self._settings.get("image_directories", []))
-        logger.info("已移除图片目录: %s", removed)
+        """移除最后一个图片目录（委托 SettingsController）。"""
+        self._settings_ctrl.remove_directory()
 
     def _remove_single_dir(self, path: str) -> None:
-        """移除指定路径的图片目录。"""
-        if self._scan_running:
-            return
-        from PySide6.QtWidgets import QMessageBox
-        reply = QMessageBox.question(
-            self, "确认删除",
-            f"确定要从壁纸库中移除「{path}」吗？\n（只是移除目录，不会删除文件）",
-            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-            QMessageBox.StandardButton.No,
-        )
-        if reply == QMessageBox.StandardButton.Yes:
-            dirs = self._settings.get("image_directories", [])
-            if path in dirs:
-                dirs.remove(path)
-                self._settings.set("image_directories", dirs)
-                self._library.remove_directory(path, scan=False)
-                self._refresh_gallery()
-                self._settings_page.refresh()
-                self._watcher.set_directories(
-                    self._settings.get("image_directories", [])
-                )
-                logger.info("已移除图片目录: %s", path)
+        """移除指定路径的图片目录（委托 SettingsController）。"""
+        self._settings_ctrl.remove_single_dir(path)
+
+    def _refresh_status(self) -> None:
+        """刷新信息卡与顶栏状态（供 SettingsController 回调）。"""
+        self._update_info_cards()
+        self.update_top_status()
 
     # ===== 业务操作 =====
 
