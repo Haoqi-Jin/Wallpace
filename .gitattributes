@@ -1,0 +1,32 @@
+# .gitattributes — 按文件类型钉死行尾策略（LF / CRLF）
+#
+# 为什么需要：本仓库原先没有 .gitattributes，只靠 core.autocrlf=true。
+# 这导致两类**已实际发生**的问题：
+#   1. `git status` 长期脏：任何工具写出的 LF-only 文件都会被判为"已修改"，
+#      而内容其实与 HEAD 逐字节一致（纯 stat 噪音，极易被误读成真实代码改动）。
+#   2. `build.bat` 被写成 LF-only：cmd.exe 解析 LF-only 批处理会**错位丢首字符**
+#      （实测行首字符被吞：`EnableDelayedExpansion` → `'pansion'`），
+#      打包脚本会静默跑错且看不出原因。
+# 钉死行尾后，这两类问题从根上消失，且换机器/换工具也不会复发。
+#
+# 注意：本文件要**提交入库**后才会生效（当前为未跟踪状态）。
+# 入库时若需要把已跟踪文件统一到新策略，另行执行 `git add --renormalize .`（属批量改动，需单独确认）。
+
+# 默认：交给 git 自行探测文本/二进制；探测为文本的按平台惯例处理
+* text=auto
+
+# ---- 必须 CRLF：由 Windows 解释器/工具直接按文本解析 ----
+# 批处理被写成 LF 会让 cmd.exe 错位解析，务必保持 CRLF
+*.bat  text eol=crlf
+*.cmd  text eol=crlf
+*.ps1  text eol=crlf
+# PyInstaller 打包配方按 Windows 惯例存 CRLF
+*.spec text eol=crlf
+
+# ---- 统一 LF：源码与配置，跨平台一致、diff 友好 ----
+*.py   text eol=lf
+*.md   text eol=lf
+*.toml text eol=lf
+*.yml  text eol=lf
+*.ini  text eol=lf
+*.txt  text eol=lf
