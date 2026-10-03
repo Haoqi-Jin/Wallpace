@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "wallpace"
-version = "0.1.0"
+dynamic = ["version"]
 description = "桌面壁纸自动切换器 — Windows 小工具"
 readme = "README.md"
 requires-python = ">=3.10"
@@ -14,8 +14,23 @@ dependencies = [
     "watchdog>=3.0.0",
 ]
 
+[project.optional-dependencies]
+# 开发/测试工具链（E4）。三者的版本下限均已核实为真实存在的发布版本，
+# 避免声明不存在的大版本号导致 `pip install -e ".[dev]"` 直接失败。
+# 安装：pip install -e ".[dev]"
+dev = [
+    "pytest>=8.0",
+    "ruff>=0.16",
+    "mypy>=2.0",
+]
+
 [project.scripts]
 wallpace = "src.main:main"
+
+[tool.setuptools.dynamic]
+# 版本号单一真源 = src/__init__.py::__version__（E6/D6）。
+# setuptools 优先用静态 AST 解析该属性，不会触发运行时导入。
+version = { attr = "src.__version__" }
 
 [tool.setuptools.packages.find]
 where = ["."]

@@ -1,0 +1,12 @@
+# Dependabot：pip 生态依赖周更。
+# 仅做依赖安全/版本跟进，不改动本仓库代码。
+version: 2
+
+updates:
+  - package-ecosystem: "pip"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 5
+    labels:
+      - "dependencies"

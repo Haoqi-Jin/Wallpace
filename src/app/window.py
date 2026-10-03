@@ -36,6 +36,7 @@ if TYPE_CHECKING:
     from src.core.settings import Settings
     from src.core.wallpaper_manager import WallpaperManager
 
+from src import __version__
 from src.app.sidebar import SidebarNavigation
 from src.core.directory_watcher import DirectoryWatcher
 from src.app.theme import (
@@ -321,7 +322,10 @@ class MainWindow(QMainWindow):
 
         bottom_layout.addStretch()
 
-        self._bottom_version = QLabel("v0.1.0")
+        # 版本号单一真源 = src/__init__.py::__version__（E6/D6）。
+        # 刻意不用 importlib.metadata：本项目支持"未安装直接运行"与 PyInstaller
+        # 打包运行，包元数据可能不存在，PackageNotFoundError 会在渲染 UI 时抛出。
+        self._bottom_version = QLabel(f"v{__version__}")
         self._bottom_version.setStyleSheet("font-size: 11px; color: #bdbdbd;")
         bottom_layout.addWidget(self._bottom_version)
 

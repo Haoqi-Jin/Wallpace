@@ -27,7 +27,11 @@ venv/
 ENV/
 
 # PyInstaller
+# 打包配方入库（E5）：继续忽略 PyInstaller 运行时自动生成的 .spec，
+# 但手工维护的 packaging/wallpace.spec 必须可跟踪，
+# 否则 clone 后拿不到打包配方（根目录那份曾被这里吞掉）。
 *.spec
+!packaging/*.spec
 build/
 dist/
 
