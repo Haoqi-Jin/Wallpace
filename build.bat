@@ -35,20 +35,28 @@ pyinstaller --version >nul 2>&1 || (
   exit /b 1
 )
 
-echo [3/3] 使用 PyInstaller 打包...
-pyinstaller ^
-  --name wallpace ^
-  --windowed ^
-  --onefile ^
-  --clean ^
-  src/main.py
+echo [3/3] 使用 PyInstaller 打包（spec = 打包行为唯一真源）...
+REM 打包行为完全由 packaging\wallpace.spec 表达（--name/--windowed/--onefile
+REM 都在 spec 内），命令行不再重复，避免"脚本与 spec 两处打包定义"长期漂移。
+REM 下一批 B1 改 --onedir 时只改 spec，本脚本无需改动。
+pyinstaller --clean --noconfirm "packaging\wallpace.spec"
 
 echo.
-if exist "dist\wallpace.exe" (
+REM 产物路径兼容两种形态，双击即可用：
+REM   onefile（当前）      -> dist\wallpace.exe
+REM   onedir（B1 之后）   -> dist\wallpace\wallpace.exe
+REM 两者都认，并打印实际产物路径；否则 B1 改 onedir 后会误报"打包失败"。
+setlocal EnableDelayedExpansion
+set "WALLPACE_EXE="
+if exist "dist\wallpace\wallpace.exe" set "WALLPACE_EXE=dist\wallpace\wallpace.exe"
+if not defined WALLPACE_EXE if exist "dist\wallpace.exe" set "WALLPACE_EXE=dist\wallpace.exe"
+
+if defined WALLPACE_EXE (
   echo ==========================================
-  echo 打包完成！可执行文件位于: dist\wallpace.exe
+  echo 打包完成！可执行文件位于: !WALLPACE_EXE!
   echo ==========================================
 ) else (
   echo 错误: 打包失败，请检查上方日志
 )
-pause
+endlocal
+pause
