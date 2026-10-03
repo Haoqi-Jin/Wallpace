@@ -25,6 +25,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import logging
 import time
 from collections.abc import Callable
@@ -291,10 +292,8 @@ class SingleInstanceGuard:
             logger.exception("读取单实例消息失败")
             return
         finally:
-            try:
+            with contextlib.suppress(RuntimeError):
                 sock.deleteLater()
-            except RuntimeError:
-                pass
 
     def _fire_activate(self) -> None:
         """安全地调用唤醒回调（回调异常不得传播）。"""

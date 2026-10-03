@@ -26,6 +26,7 @@ QueuedConnection 把事件排队回主线程；主线程里做防抖，防抖结
 这里把 `debounce_ms`（默认 1500 ms）内的所有事件合并为一次通知。
 """
 
+import contextlib
 import logging
 from collections.abc import Callable, Iterable
 from pathlib import Path
@@ -228,10 +229,8 @@ class DirectoryWatcher(QObject):
 
     def _on_relevant_event(self) -> None:
         """Observer 线程调用：只 emit 内部信号，由 Qt 排回主线程。"""
-        try:
+        with contextlib.suppress(RuntimeError):
             self._raw_event.emit()
-        except RuntimeError:
-            pass
 
     def _on_raw_event(self) -> None:
         """主线程：重启防抖定时器，把窗口期内的事件合并为一次。"""

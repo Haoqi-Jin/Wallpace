@@ -39,6 +39,7 @@ emit 会扇出 N 次回调，整体是 O(N²) 次主线程回调（P1-4）。
 ``configure_cache()`` / ``cache_stats()`` / ``clear_cache()`` 管理。
 """
 
+import contextlib
 import logging
 import os
 import threading
@@ -247,11 +248,8 @@ def _remove_broadcast(slot: _ReadyCallback | None) -> None:
     """从广播列表中移除槽（内部辅助，不存在时静默忽略）。"""
     if slot is None:
         return
-    with _broadcast_lock:
-        try:
-            _broadcast.remove(slot)
-        except ValueError:
-            pass
+    with _broadcast_lock, contextlib.suppress(ValueError):
+        _broadcast.remove(slot)
 
 
 def connect_ready(slot: _ReadyCallback) -> _BroadcastSubscription:

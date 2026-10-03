@@ -6,6 +6,7 @@
     python src/main.py --test   # 只运行核心模块测试
 """
 
+import contextlib
 import logging
 import sys
 from pathlib import Path
@@ -21,10 +22,8 @@ LOG_DIR.mkdir(parents=True, exist_ok=True)
 # 卡死时自动把主线程堆栈 dump 到日志，便于排查 UI 无响应类问题
 import faulthandler
 
-try:
+with contextlib.suppress(OSError):
     faulthandler.enable(file=open(LOG_DIR / "traceback.log", "w"))
-except OSError:
-    pass
 logging.basicConfig(
     level=logging.DEBUG if "--debug" in sys.argv else logging.INFO,
     format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",

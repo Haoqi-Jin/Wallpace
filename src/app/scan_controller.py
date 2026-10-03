@@ -9,6 +9,7 @@
 设计见 ``docs/optimization-batch2-design.md`` §1.4。
 """
 
+import contextlib
 import logging
 from typing import TYPE_CHECKING
 
@@ -44,11 +45,9 @@ class _ScanJob(QRunnable):
         except Exception:
             logger.exception("后台扫描图片库失败")
             images = []
-        try:
+        # 信号载体已随窗口销毁，静默丢弃结果
+        with contextlib.suppress(RuntimeError):
             self._signals.finished.emit(images)
-        except RuntimeError:
-            # 信号载体已随窗口销毁，静默丢弃结果
-            pass
 
 
 class ScanController(QObject):

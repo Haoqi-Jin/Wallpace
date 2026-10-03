@@ -4,6 +4,7 @@
 遵循 MVC 分离：UI 只负责展示和用户交互，业务逻辑委托给 core 层。
 """
 
+import contextlib
 import logging
 import random
 from datetime import datetime
@@ -540,14 +541,12 @@ class MainWindow(QMainWindow):
             # 的定时器生命周期），裸 except 在这里是少数派。
             # 注：注释刻意不写"共 N 处"这类计数与行号——它们会随改动腐烂，
             # 而读者会当成现状。
-            try:
+            # 刻意保持两个独立的 suppress 块：若合并成一个，stop() 抛异常会
+            # 导致 deleteLater() 被跳过，与原有"两次清理各自尽力"的语义不同。
+            with contextlib.suppress(RuntimeError):
                 self._clock_timer.stop()
-            except RuntimeError:
-                pass
-            try:
+            with contextlib.suppress(RuntimeError):
                 self._clock_timer.deleteLater()
-            except RuntimeError:
-                pass
             self._clock_timer = None
 
         self._clock_timer = QTimer(self)
