@@ -17,10 +17,15 @@ from PySide6.QtCore import (
 )
 from PySide6.QtGui import QIcon
 from PySide6.QtWidgets import (
-    # QFileDialog 的业务调用已迁至 SettingsController，但此处**保留导入**：
+    # QFileDialog 的业务调用已迁至 SettingsController，但此处**必须保留导入**：
     # 既有测试以 "src.app.window.QFileDialog.getExistingDirectory" 为 monkeypatch
-    # 锚点（作用于共享的类对象，迁移后仍生效），移除导入会使该锚点解析失败。
-    QFileDialog,
+    # 锚点（作用于共享的类对象，迁移后仍生效），移除导入会使该锚点解析失败
+    # （pytest 报 ImportError: import error in src.app.window.QFileDialog）。
+    # 该引用是**动态字符串路径**，静态分析看不见，因此 F401 会误判为未使用；
+    # 故显式豁免。全量排查结论：tests/ 中按字符串路径 patch 的模块级属性仅
+    # QFileDialog 与 AutostartManager 两处，后者被 autostart_manager_factory
+    # 真实使用（ruff 不报 F401），故只需豁免本行。
+    QFileDialog,  # noqa: F401
     QFrame,
     QHBoxLayout,
     QLabel,
