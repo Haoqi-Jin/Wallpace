@@ -23,7 +23,10 @@ LOG_DIR.mkdir(parents=True, exist_ok=True)
 import faulthandler
 
 with contextlib.suppress(OSError):
-    faulthandler.enable(file=open(LOG_DIR / "traceback.log", "w"))
+    # 刻意**不**用 with open(...)：faulthandler 捕获的是文件描述符，
+    # with 块退出即 close，此后崩溃就再也写不进 traceback（实测 fd 失效，
+    # os.fstat -> OSError 9）。这正是本行要保留的文件句柄常开写法。
+    faulthandler.enable(file=open(LOG_DIR / "traceback.log", "w"))  # noqa: SIM115
 logging.basicConfig(
     level=logging.DEBUG if "--debug" in sys.argv else logging.INFO,
     format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
