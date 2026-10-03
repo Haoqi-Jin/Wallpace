@@ -26,6 +26,9 @@ with contextlib.suppress(OSError):
     # 刻意**不**用 with open(...)：faulthandler 捕获的是文件描述符，
     # with 块退出即 close，此后崩溃就再也写不进 traceback（实测 fd 失效，
     # os.fstat -> OSError 9）。这正是本行要保留的文件句柄常开写法。
+    # 已实测：faulthandler 内部持有该文件对象的引用，故此处用临时形式打开是
+    # 安全的（对象被回收后 fd 仍有效）；改用 with open(...) 反而会在块退出时
+    # close，导致崩溃 traceback 写入失败（os.fstat -> OSError 9）。
     faulthandler.enable(file=open(LOG_DIR / "traceback.log", "w"))  # noqa: SIM115
 logging.basicConfig(
     level=logging.DEBUG if "--debug" in sys.argv else logging.INFO,
