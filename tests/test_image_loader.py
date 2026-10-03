@@ -230,7 +230,8 @@ class TestImageLoaderDecode:
                 if results:
                     break
                 QCoreApplication.processEvents()
-                import time; time.sleep(0.1)
+                import time
+                time.sleep(0.1)
         finally:
             conn.disconnect()
 
@@ -246,7 +247,8 @@ class TestImageLoaderDecode:
         conn = image_loader.connect_ready(lambda p, img: results.append((p, img)))
         try:
             image_loader.load_async(str(tmp_path / "nonexistent.png"), QSize(50, 50))
-            import time; time.sleep(0.5)
+            import time
+            time.sleep(0.5)
             QCoreApplication.processEvents()
         finally:
             conn.disconnect()
@@ -270,7 +272,8 @@ class TestImageLoaderDecode:
                 if results:
                     break
                 QCoreApplication.processEvents()
-                import time; time.sleep(0.1)
+                import time
+                time.sleep(0.1)
         finally:
             conn.disconnect()
 
