@@ -17,7 +17,7 @@ MainWindow 只保留同名 facade 方法转发到本控制器。
 """
 
 import logging
-from typing import Callable, Optional
+from collections.abc import Callable
 
 from PySide6.QtCore import QObject
 from PySide6.QtWidgets import QFileDialog, QMessageBox
@@ -32,7 +32,7 @@ class SettingsController(QObject):
         self,
         settings,
         library,
-        scheduler_provider: Callable[[], Optional[object]],
+        scheduler_provider: Callable[[], object | None],
         settings_page,
         wallpaper_manager,
         scan_state: Callable[[], bool],
@@ -40,8 +40,8 @@ class SettingsController(QObject):
         refresh_gallery: Callable[[], None],
         refresh_status: Callable[[], None],
         set_watcher_directories: Callable[[list], None],
-        on_switch: Optional[Callable[[str], None]] = None,
-        autostart_manager_factory: Optional[Callable[[], object]] = None,
+        on_switch: Callable[[str], None] | None = None,
+        autostart_manager_factory: Callable[[], object] | None = None,
     ) -> None:
         """注入依赖。
 

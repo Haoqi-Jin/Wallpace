@@ -3,13 +3,11 @@
 覆盖：加载、保存、get/set、重置、验证、JSON 解析错误处理。
 """
 
-import json
-from pathlib import Path
 import sys
+from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 
-import pytest
 
 from core.settings import DEFAULT_CONFIG, Settings
 

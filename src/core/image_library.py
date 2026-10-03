@@ -4,22 +4,21 @@
 不依赖任何 GUI 框架，纯 Python 标准库 + pathlib。
 """
 
-import hashlib
 import logging
 import os
 import random
+from collections.abc import Iterator
 from pathlib import Path
-from typing import Callable, Iterator, List, Optional, Set, Tuple
 
 logger = logging.getLogger(__name__)
 
 # 默认扩展名集合（小写）
 # 与 README 功能表保持一致（含 BMP/GIF）。GIF 动图由 QImageReader 读取首帧，
 # 作为缩略图/壁纸均可接受。
-DEFAULT_EXTENSIONS: Set[str] = {"jpg", "jpeg", "png", "webp", "bmp", "gif"}
+DEFAULT_EXTENSIONS: set[str] = {"jpg", "jpeg", "png", "webp", "bmp", "gif"}
 
 
-def _iter_image_files(root: Path, supported: Set[str]) -> Iterator[Path]:
+def _iter_image_files(root: Path, supported: set[str]) -> Iterator[Path]:
     """递归产出 root 下扩展名受支持的图片文件（已 resolve）。
 
     这里用 `os.scandir` 手工递归，而不是 `root.rglob("*")`：
@@ -28,7 +27,7 @@ def _iter_image_files(root: Path, supported: Set[str]) -> Iterator[Path]:
     scandir 的 DirEntry 在 Windows 上自带类型信息，可省掉额外 stat，
     且我们在遍历时就丢弃无关条目，只对命中的图片做 resolve。
     """
-    stack: List[str] = [str(root)]
+    stack: list[str] = [str(root)]
     while stack:
         current = stack.pop()
         try:
@@ -60,8 +59,8 @@ class ImageLibrary:
 
     def __init__(
         self,
-        directories: Optional[List[str]] = None,
-        extensions: Optional[Set[str]] = None,
+        directories: list[str] | None = None,
+        extensions: set[str] | None = None,
     ) -> None:
         """初始化图片库。
 
@@ -69,22 +68,22 @@ class ImageLibrary:
             directories: 要扫描的图片文件夹列表；空列表则跳过扫描。
             extensions: 允许的扩展名集合（不含点，全部小写）。
         """
-        self._directories: List[str] = directories or []
+        self._directories: list[str] = directories or []
         self._extensions = (
             {e.lower().lstrip(chr(46)) for e in extensions}
             if extensions
             else set(DEFAULT_EXTENSIONS)
         )
         # 运行时状态
-        self._all_images: List[str] = []  # scan() 的结果缓存
+        self._all_images: list[str] = []  # scan() 的结果缓存
         # 上次扫描时的目录 mtime 签名，用于增量扫描（None = 尚无有效签名）
-        self._last_scan_signature: Optional[Tuple[str, ...]] = None
-        self._skip_set: Set[str] = set()   # 去重用
-        self._favorite_set: Set[str] = set()
+        self._last_scan_signature: tuple[str, ...] | None = None
+        self._skip_set: set[str] = set()   # 去重用
+        self._favorite_set: set[str] = set()
 
     # ==================== 公开 API ====================
 
-    def scan(self, force: bool = False) -> List[str]:
+    def scan(self, force: bool = False) -> list[str]:
         """递归扫描所有配置的文件夹，返回可用图片路径。
 
         带增量检查：若所有目录（含子目录）的签名（目录条目数 + mtime）与上次
@@ -107,7 +106,7 @@ class ImageLibrary:
             logger.debug("目录未变化，复用上次扫描结果: %d 张", len(self._all_images))
             return list(self._all_images)
 
-        images: List[str] = []
+        images: list[str] = []
         for dir_str in self._directories:
             root = Path(dir_str)
             if not root.is_dir():
@@ -116,8 +115,8 @@ class ImageLibrary:
             images.extend(str(p) for p in _iter_image_files(root, self._extensions))
 
         # 去重 + 排序
-        unique: List[str] = []
-        seen: Set[str] = set()
+        unique: list[str] = []
+        seen: set[str] = set()
         for img in sorted(images):
             if img not in seen:
                 seen.add(img)
@@ -127,7 +126,7 @@ class ImageLibrary:
         logger.info("扫描完成: %d 张图片", len(unique))
         return unique
 
-    def refresh(self, force: bool = False) -> List[str]:
+    def refresh(self, force: bool = False) -> list[str]:
         """快捷调用 scan + reload 的组合。
 
         Args:
@@ -135,7 +134,7 @@ class ImageLibrary:
         """
         return self.scan(force=force)
 
-    def _directory_signature(self) -> Optional[Tuple[str, ...]]:
+    def _directory_signature(self) -> tuple[str, ...] | None:
         """采集所有配置目录（含子目录）的状态签名，用于增量扫描判断。
 
         每个目录同时记录两项信息（拼成 ``路径|mtime_ns|条目数``）：
@@ -161,7 +160,7 @@ class ImageLibrary:
             排序后的签名元组；只要有任何配置目录缺失/不可读就返回 None，
             表示「无法安全增量」，调用方会退化为全量扫描（宁可多扫不漏扫）。
         """
-        entries: List[str] = []
+        entries: list[str] = []
         for dir_str in self._directories:
             root = Path(dir_str)
             if not root.is_dir():
@@ -187,7 +186,7 @@ class ImageLibrary:
                     return None
         return tuple(sorted(entries))
 
-    def list_available(self) -> List[str]:
+    def list_available(self) -> list[str]:
         """获取当前可用的图片列表（排除已跳过的）。
 
         Returns:
@@ -195,7 +194,7 @@ class ImageLibrary:
         """
         return [img for img in self._all_images if img not in self._skip_set]
 
-    def get_random(self) -> Optional[str]:
+    def get_random(self) -> str | None:
         """从可用列表中随机选择一张图片。
 
         Returns:
@@ -321,7 +320,7 @@ class ImageLibrary:
             logger.info("取消收藏: %s", key)
         return removed
 
-    def load_persisted_state(self, skip_list: List[str], favorites: List[str]) -> None:
+    def load_persisted_state(self, skip_list: list[str], favorites: list[str]) -> None:
         """从持久化配置载入跳过列表与收藏列表。
 
         在应用启动时调用，把 Settings 中保存的 skip_list / favorites 还原到内存集合。
@@ -339,12 +338,12 @@ class ImageLibrary:
         )
 
     @property
-    def skip_list(self) -> List[str]:
+    def skip_list(self) -> list[str]:
         """返回跳过列表的副本（可安全用于序列化）。"""
         return sorted(self._skip_set)
 
     @property
-    def favorites(self) -> List[str]:
+    def favorites(self) -> list[str]:
         """返回收藏列表的副本。"""
         return sorted(self._favorite_set)
 

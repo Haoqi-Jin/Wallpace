@@ -27,11 +27,11 @@ QueuedConnection 把事件排队回主线程；主线程里做防抖，防抖结
 """
 
 import logging
+from collections.abc import Callable, Iterable
 from pathlib import Path
-from typing import Any, Callable, Dict, Iterable, List, Optional, Set
+from typing import Any
 
 from PySide6.QtCore import QObject, QTimer, Signal
-
 from watchdog.events import FileSystemEventHandler
 from watchdog.observers import Observer
 
@@ -54,7 +54,7 @@ class _ImageChangeHandler(FileSystemEventHandler):
     def __init__(
         self,
         on_relevant_event: Callable[[], None],
-        get_extensions: Callable[[], Set[str]],
+        get_extensions: Callable[[], set[str]],
     ) -> None:
         super().__init__()
         self._on_relevant_event = on_relevant_event
@@ -114,20 +114,20 @@ class DirectoryWatcher(QObject):
 
     def __init__(
         self,
-        extensions: Optional[Iterable[str]] = None,
+        extensions: Iterable[str] | None = None,
         debounce_ms: int = DEFAULT_DEBOUNCE_MS,
-        observer_factory: Optional[Callable[[], Any]] = None,
-        parent: Optional[QObject] = None,
+        observer_factory: Callable[[], Any] | None = None,
+        parent: QObject | None = None,
     ) -> None:
         super().__init__(parent)
-        self._extensions: Set[str] = self._normalize_extensions(extensions)
+        self._extensions: set[str] = self._normalize_extensions(extensions)
         self._debounce_ms: int = int(debounce_ms)
         self._observer_factory: Callable[[], Any] = observer_factory or Observer
 
         self._enabled: bool = True
-        self._directories: List[str] = []
-        self._watches: Dict[str, Any] = {}  # 归一化目录路径 -> ObservedWatch
-        self._observer: Optional[Any] = None
+        self._directories: list[str] = []
+        self._watches: dict[str, Any] = {}  # 归一化目录路径 -> ObservedWatch
+        self._observer: Any | None = None
 
         self._handler = _ImageChangeHandler(
             on_relevant_event=self._on_relevant_event,
@@ -155,7 +155,7 @@ class DirectoryWatcher(QObject):
         return self._observer is not None
 
     @property
-    def watched_directories(self) -> List[str]:
+    def watched_directories(self) -> list[str]:
         """当前实际被监听的目录（归一化后的路径）。"""
         return sorted(self._watches)
 
@@ -164,7 +164,7 @@ class DirectoryWatcher(QObject):
         """防抖窗口（毫秒）。"""
         return self._debounce_ms
 
-    def set_extensions(self, extensions: Optional[Iterable[str]]) -> None:
+    def set_extensions(self, extensions: Iterable[str] | None) -> None:
         """更新关注的扩展名集合（不含点，小写）。"""
         self._extensions = self._normalize_extensions(extensions)
 
@@ -183,7 +183,7 @@ class DirectoryWatcher(QObject):
         else:
             self._teardown_observer()
 
-    def set_directories(self, directories: Optional[Iterable[str]]) -> None:
+    def set_directories(self, directories: Iterable[str] | None) -> None:
         """同步监听的目录列表（增量增删，不会重建已有 watch）。
 
         Args:
@@ -208,7 +208,7 @@ class DirectoryWatcher(QObject):
     # ==================== 内部实现 ====================
 
     @staticmethod
-    def _normalize_extensions(extensions: Optional[Iterable[str]]) -> Set[str]:
+    def _normalize_extensions(extensions: Iterable[str] | None) -> set[str]:
         """把扩展名统一成不含点的小写集合。"""
         if not extensions:
             return set()
@@ -245,7 +245,7 @@ class DirectoryWatcher(QObject):
         self._debounce_timer.stop()
         self.changes_detected.emit()
 
-    def _ensure_observer(self) -> Optional[Any]:
+    def _ensure_observer(self) -> Any | None:
         """惰性创建并启动 Observer（没有任何目录时不创建，避免空转线程）。"""
         if self._observer is not None:
             return self._observer
@@ -282,7 +282,7 @@ class DirectoryWatcher(QObject):
                 self._teardown_observer()
             return
 
-        wanted: Dict[str, str] = {}
+        wanted: dict[str, str] = {}
         for directory in self._directories:
             path = Path(directory)
             if not path.is_dir():

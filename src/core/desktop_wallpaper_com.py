@@ -49,7 +49,6 @@ import threading
 import uuid
 from dataclasses import dataclass
 from pathlib import Path
-from typing import List, Optional
 
 logger = logging.getLogger(__name__)
 
@@ -111,9 +110,9 @@ class DesktopWallpaperCOM:
 
     def __init__(self) -> None:
         # 注意：构造函数绝不触碰 COM，保证非 Windows / 无桌面会话下可安全构造。
-        self._ptr: Optional[ctypes.c_void_p] = None
+        self._ptr: ctypes.c_void_p | None = None
         self._co_initialized: bool = False  # 是否需要由我们 CoUninitialize
-        self._available: Optional[bool] = None  # 三态：None=尚未探测
+        self._available: bool | None = None  # 三态：None=尚未探测
         self._lock = threading.Lock()
 
     # ==================== 公开 API ====================
@@ -130,7 +129,7 @@ class DesktopWallpaperCOM:
                     self._available = self._initialize()
         return bool(self._available)
 
-    def list_monitors(self) -> List[MonitorInfo]:
+    def list_monitors(self) -> list[MonitorInfo]:
         """枚举系统显示器。
 
         Returns:
@@ -151,7 +150,7 @@ class DesktopWallpaperCOM:
                     "GetMonitorDevicePathCount 失败: hr=0x%08X", hr & 0xFFFFFFFF
                 )
                 return []
-            monitors: List[MonitorInfo] = []
+            monitors: list[MonitorInfo] = []
             for index in range(int(count.value)):
                 device_path = self._get_monitor_path(index)
                 if device_path:
@@ -268,7 +267,7 @@ class DesktopWallpaperCOM:
             logger.warning("初始化 IDesktopWallpaper COM 失败", exc_info=True)
             return False
 
-    def _get_monitor_path(self, index: int) -> Optional[str]:
+    def _get_monitor_path(self, index: int) -> str | None:
         """取第 ``index`` 个显示器的设备路径；失败返回 None。
 
         ``GetMonitorDevicePathAt`` 返回的字符串需由调用方 ``CoTaskMemFree``，

@@ -9,7 +9,6 @@ import ctypes
 import logging
 import sys
 from pathlib import Path
-from typing import Dict, List, Optional
 
 from src.core.desktop_wallpaper_com import DesktopWallpaperCOM
 
@@ -85,7 +84,7 @@ class WallpaperManager:
             logger.error("调用 Windows API 出错: %s", exc)
             return False
 
-    def set_wallpapers(self, mapping: Dict[str, str]) -> bool:
+    def set_wallpapers(self, mapping: dict[str, str]) -> bool:
         """逐屏设置壁纸：``{monitor_id: image_path}``，key ``""`` 表示全部显示器。
 
         全部成功返回 True；任一失败/异常都返回 False，并**回退为统一 SPI 设置**
@@ -129,7 +128,7 @@ class WallpaperManager:
             self.set_wallpaper(fallback)
         return all_ok
 
-    def list_monitors(self) -> List[dict]:
+    def list_monitors(self) -> list[dict]:
         """枚举系统显示器。
 
         Returns:
@@ -149,7 +148,7 @@ class WallpaperManager:
         """
         self._com.release()
 
-    def get_current_wallpaper(self) -> Optional[str]:
+    def get_current_wallpaper(self) -> str | None:
         """尝试读取当前系统壁纸路径。
 
         从注册表 HKCU\\Control Panel\\Desktop\\WallPaper 读取。
@@ -174,7 +173,7 @@ class WallpaperManager:
             ) as key:
                 wallpaper, _ = winreg.QueryValueEx(key, value_name)
                 return str(wallpaper) if wallpaper else None
-        except (OSError, WindowsError):
+        except OSError:
             logger.warning("无法读取当前壁纸路径")
             return None
 

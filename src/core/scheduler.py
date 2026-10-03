@@ -10,9 +10,11 @@
 """
 
 import logging
-from datetime import datetime, time as dt_time, timedelta
+from collections.abc import Callable
+from datetime import datetime, timedelta
+from datetime import time as dt_time
 from pathlib import Path
-from typing import TYPE_CHECKING, Callable, Optional
+from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:  # pragma: nocover
     from src.core.image_library import ImageLibrary
@@ -38,7 +40,7 @@ class Scheduler:
         self,
         mode: str = SWITCH_MODE_DAILY,
         daily_time: str = "08:00",
-        interval_minutes: Optional[int] = None,
+        interval_minutes: int | None = None,
     ) -> None:
         if mode not in VALID_MODES:
             raise ValueError(
@@ -48,17 +50,17 @@ class Scheduler:
         self._mode: str = mode
         self._daily_time_str: str = daily_time
         self._daily_time: dt_time = self._parse_time(daily_time)
-        self._interval_minutes: Optional[int] = interval_minutes
+        self._interval_minutes: int | None = interval_minutes
         self._is_running: bool = False
         self._is_paused: bool = False
 
         # PySide6 QTimer 实例
-        self._timer: Optional["QTimer"] = None
-        self._on_switch: Optional[Callable[[str], None]] = None
-        self._library: Optional["ImageLibrary"] = None
-        self._wallpaper_manager: Optional["WallpaperManager"] = None
+        self._timer: QTimer | None = None
+        self._on_switch: Callable[[str], None] | None = None
+        self._library: ImageLibrary | None = None
+        self._wallpaper_manager: WallpaperManager | None = None
         # 可注入的壁纸设置器（#7 逐屏模式分流用）。None = 回落 WallpaperManager。
-        self._wallpaper_applier: Optional[Callable[[str], bool]] = None
+        self._wallpaper_applier: Callable[[str], bool] | None = None
 
         logger.info(
             "Scheduler 初始化: mode=%s, daily=%s, interval=%s",
@@ -76,7 +78,7 @@ class Scheduler:
         self._wallpaper_manager = wallpaper_manager
 
     def set_wallpaper_applier(
-        self, func: Optional[Callable[[str], bool]]
+        self, func: Callable[[str], bool] | None
     ) -> None:
         """注入自定义的壁纸设置器（可选）。
 
@@ -130,7 +132,7 @@ class Scheduler:
                 self.stop()
                 self.resume()
 
-    def start(self, on_switch: Optional[Callable[[str], None]] = None) -> None:
+    def start(self, on_switch: Callable[[str], None] | None = None) -> None:
         if self._is_running and not self._is_paused:
             logger.warning("调度器已在运行，忽略 start()")
             return
@@ -207,11 +209,11 @@ class Scheduler:
         return self._is_running
 
     @property
-    def interval_minutes(self) -> Optional[int]:
+    def interval_minutes(self) -> int | None:
         """返回当前设置的间隔分钟数（仅 interval 模式有意义）。"""
         return self._interval_minutes
 
-    def set_interval_minutes(self, minutes: Optional[int]) -> None:
+    def set_interval_minutes(self, minutes: int | None) -> None:
         """更新间隔分钟数；若正在以间隔模式运行，则重建定时器立即生效。
 
         此前 UI 层只能直写 `scheduler._interval_minutes`（绕过定时器重建），
@@ -343,7 +345,7 @@ class Scheduler:
         if self._is_running and not self._is_paused:
             self._start_daily_timer()
 
-    def seconds_until_next(self) -> Optional[int]:
+    def seconds_until_next(self) -> int | None:
         """距下次自动切换的剩余秒数；未运行/已暂停/无定时器 → None。
 
         统一覆盖 daily_random 与 interval_minutes 两种模式（都走 ``self._timer``）。
@@ -374,7 +376,7 @@ class Scheduler:
             return None
         return ms // 1000
 
-    def get_next_switch_time(self) -> Optional[datetime]:
+    def get_next_switch_time(self) -> datetime | None:
         """Return the next scheduled switch time (daily_random mode only).
 
         Returns None if scheduler is not running or not in daily mode.

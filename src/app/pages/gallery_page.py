@@ -21,15 +21,15 @@
 """
 
 import logging
-from typing import Callable, List, Optional, Tuple
+from collections.abc import Callable
 
-from PySide6.QtCore import Qt, QSize
+from PySide6.QtCore import QSize, Qt
 from PySide6.QtGui import QImage, QPixmap
 from PySide6.QtWidgets import (
-    QPushButton,
     QGridLayout,
     QHBoxLayout,
     QLabel,
+    QPushButton,
     QScrollArea,
     QVBoxLayout,
     QWidget,
@@ -57,7 +57,7 @@ class _Tile(QWidget):
         on_set: Callable[[str], None],
         on_persist: Callable[[], None],
         page: "GalleryPage",
-        parent: Optional[QWidget] = None,
+        parent: QWidget | None = None,
     ) -> None:
         super().__init__(parent)
         self._path = path
@@ -148,7 +148,7 @@ class GalleryPage(QWidget):
         image_loader,
         on_set_wallpaper: Callable[[str], None],
         on_persist: Callable[[], None],
-        parent: Optional[QWidget] = None,
+        parent: QWidget | None = None,
     ) -> None:
         super().__init__(parent)
         self._library = library
@@ -158,9 +158,9 @@ class GalleryPage(QWidget):
         self._filter = "all"  # all | favorites | skipped
 
         # --- 分页懒加载状态 ---
-        self._pending_paths: List[str] = []   # 尚未创建 tile 的图片路径
+        self._pending_paths: list[str] = []   # 尚未创建 tile 的图片路径
         self._rendered_count: int = 0         # 已创建 tile 的数量（也是下一个网格下标）
-        self._signature: Optional[Tuple] = None  # 上次渲染的数据签名，用于去重
+        self._signature: tuple | None = None  # 上次渲染的数据签名，用于去重
 
         self._build_ui()
 
@@ -215,14 +215,14 @@ class GalleryPage(QWidget):
         self._btn_fav.setChecked(self._filter == "favorites")
         self._btn_skip.setChecked(self._filter == "skipped")
 
-    def _current_paths(self) -> List[str]:
+    def _current_paths(self) -> list[str]:
         if self._filter == "favorites":
             return self._library.favorites
         if self._filter == "skipped":
             return self._library.skip_list
         return self._library.list_available()
 
-    def _data_signature(self, paths: List[str]) -> Tuple:
+    def _data_signature(self, paths: list[str]) -> tuple:
         """当前渲染数据的签名，用于判断"数据是否真的变了"。
 
         包含收藏/跳过数量，因为切换「全部」筛选下的收藏状态时路径列表不变，
@@ -290,7 +290,7 @@ class GalleryPage(QWidget):
             self._grid.addWidget(tile, index // GRID_COLS, index % GRID_COLS)
             self._rendered_count += 1
 
-    def _maybe_append_batch(self, *args) -> None:  # noqa: ANN002
+    def _maybe_append_batch(self, *args) -> None:
         """滚动接近底部时追加下一批缩略图（懒加载）。"""
         if not self._pending_paths:
             return
@@ -313,7 +313,7 @@ class GalleryPage(QWidget):
         """尚未创建的 tile 数量。"""
         return len(self._pending_paths)
 
-    def showEvent(self, event) -> None:  # noqa: ANN001
+    def showEvent(self, event) -> None:
         # 切到该页时按最新 library 状态刷新；数据未变则 refresh 内部直接返回
         self.refresh()
         super().showEvent(event)

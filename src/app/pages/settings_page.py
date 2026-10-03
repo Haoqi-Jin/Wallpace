@@ -7,7 +7,7 @@ AutostartManager 等模块的引用关系，既完成了「拆分 window.py」�
 """
 
 import logging
-from typing import Callable, Dict
+from collections.abc import Callable
 
 from PySide6.QtWidgets import (
     QCheckBox,
@@ -47,7 +47,7 @@ class SettingsPage(QWidget):
     def __init__(
         self,
         settings,
-        callbacks: Dict[str, Callable],
+        callbacks: dict[str, Callable],
         parent: QWidget = None,
     ) -> None:
         super().__init__(parent)

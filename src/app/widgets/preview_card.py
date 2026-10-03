@@ -6,10 +6,9 @@ and transition operations.
 
 import logging
 from pathlib import Path
-from typing import Optional
 
-from PySide6.QtCore import Qt, QSize, Signal
-from PySide6.QtGui import QColor, QImageReader, QLinearGradient, QPainter, QPixmap
+from PySide6.QtCore import QSize, Qt, Signal
+from PySide6.QtGui import QPixmap
 from PySide6.QtWidgets import (
     QHBoxLayout,
     QLabel,
@@ -18,8 +17,8 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from src.app.theme import COLOR_GRAY_100, COLOR_GRAY_200, COLOR_GRAY_500
 from src.app import image_loader
+from src.app.theme import COLOR_GRAY_100, COLOR_GRAY_200, COLOR_GRAY_500
 
 logger = logging.getLogger(__name__)
 
@@ -35,7 +34,7 @@ class PreviewCardWidget(QWidget):
     skip_clicked = Signal()
     favorite_clicked = Signal()
 
-    def __init__(self, parent: Optional[QWidget] = None) -> None:
+    def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self._current_path: str = ""
         self._current_index: int = 0

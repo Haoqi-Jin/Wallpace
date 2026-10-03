@@ -12,10 +12,9 @@ from typing import TYPE_CHECKING, Optional
 
 from PySide6.QtCore import (
     Qt,
-    Slot,
     QTimer,
+    Slot,
 )
-from PySide6.QtGui import QIcon
 from PySide6.QtWidgets import (
     # QFileDialog 的业务调用已迁至 SettingsController，但此处**必须保留导入**：
     # 既有测试以 "src.app.window.QFileDialog.getExistingDirectory" 为 monkeypatch
@@ -42,28 +41,24 @@ if TYPE_CHECKING:
     from src.core.wallpaper_manager import WallpaperManager
 
 from src import __version__
+from src.app import image_loader
+from src.app.icon import create_app_icon
+from src.app.pages.gallery_page import GalleryPage
+from src.app.pages.settings_page import SettingsPage
+from src.app.scan_controller import ScanController
+from src.app.settings_controller import SettingsController
 from src.app.sidebar import SidebarNavigation
-from src.core.directory_watcher import DirectoryWatcher
 from src.app.theme import (
     COLOR_BLUE_DARK,
-    COLOR_GRAY_100,
-    COLOR_GRAY_50,
-        COLOR_GRAY_500,
+    COLOR_GRAY_500,
     COLOR_GRAY_800,
-    COLOR_PINK_LIGHT,
-    COLOR_BLUE_LIGHT,
     ThemeManager,
 )
 from src.app.tray import TrayIcon
-from src.app.widgets.preview_card import PreviewCardWidget
-from src.app.icon import create_app_icon
-from src.app import image_loader
-from src.app.scan_controller import ScanController
-from src.app.settings_controller import SettingsController
 from src.app.widgets.gallery_strip import GalleryStrip
+from src.app.widgets.preview_card import PreviewCardWidget
 from src.core.autostart_registry import AutostartManager
-from src.app.pages.gallery_page import GalleryPage
-from src.app.pages.settings_page import SettingsPage
+from src.core.directory_watcher import DirectoryWatcher
 
 logger = logging.getLogger(__name__)
 
@@ -115,11 +110,11 @@ class MainWindow(QMainWindow):
             self._scheduler.set_wallpaper_applier(self._apply_wallpaper_for_mode)
 
         self._current_image_index = 0
-        self._clock_timer: Optional["QTimer"] = None
+        self._clock_timer: QTimer | None = None
         # 时钟文本去重缓存（#8）：文本未变化时不再 setText，避免 1 Hz 无效重绘
-        self._last_clock_time_text: Optional[str] = None
-        self._last_clock_date_text: Optional[str] = None
-        self._last_next_text: Optional[str] = None
+        self._last_clock_time_text: str | None = None
+        self._last_clock_date_text: str | None = None
+        self._last_next_text: str | None = None
 
         # --- 异步扫描基础设施（#1：状态机已提取到 ScanController）---
         # 专用单线程池 + running/pending 合并补扫，均封装在 ScanController 内。
@@ -204,7 +199,7 @@ class MainWindow(QMainWindow):
                 tray.show()
                 tray.setVisible(True)
             logger.info("已恢复主窗口到前台（响应第二实例激活请求）")
-        except Exception:  # noqa: BLE001 —— 恢复前台失败不影响实例运行
+        except Exception:
             logger.exception("恢复主窗口到前台失败")
 
     def _setup_ui(self) -> None:
@@ -548,7 +543,7 @@ class MainWindow(QMainWindow):
             except:
                 pass
             self._clock_timer = None
-        
+
         self._clock_timer = QTimer(self)
         self._clock_timer.timeout.connect(self._update_clock)
         self._clock_timer.start(1000)  # 每秒更新

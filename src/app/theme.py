@@ -4,11 +4,9 @@
 遵循 dev-standards.md 的配色约定。
 """
 
-from typing import Dict, Optional
 
-from PySide6.QtGui import QColor, QFont, QFontDatabase
+from PySide6.QtGui import QFont
 from PySide6.QtWidgets import QApplication
-
 
 # ==================== 配色常量 ====================
 COLOR_PINK_LIGHT = "#fce4ec"       # 极浅粉（卡片底色 / 背景装饰）
@@ -26,7 +24,7 @@ COLOR_GRAY_200 = "#eeeeee"         # 边线灰
 COLOR_GRAY_500 = "#9e9e9e"         # 中灰（次文本）
 COLOR_GRAY_800 = "#424242"         # 深灰（正文）
 
-GRAY_COLORS: Dict[str, str] = {
+GRAY_COLORS: dict[str, str] = {
     "50": COLOR_GRAY_50,
     "100": COLOR_GRAY_100,
     "200": COLOR_GRAY_200,
@@ -46,7 +44,7 @@ class ThemeManager:
     MODE_GRADIENT = "gradient"
 
     def __init__(self) -> None:
-        self._font_title: Optional[QFont] = None
+        self._font_title: QFont | None = None
 
     # ==================== QSS 样式表 ====================
 

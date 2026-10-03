@@ -4,8 +4,6 @@
 覆盖：初始化、模式切换、暂停/恢复、触发、错误处理。
 """
 
-from pathlib import Path
-from typing import Generator
 
 import pytest
 

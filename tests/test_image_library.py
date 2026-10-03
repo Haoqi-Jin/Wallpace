@@ -1,10 +1,8 @@
 """tests/test_image_library.py -- ImageLibrary module tests."""
 
+import sys
 from pathlib import Path
 
-import pytest
-
-import sys
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 
 from core.image_library import DEFAULT_EXTENSIONS, ImageLibrary

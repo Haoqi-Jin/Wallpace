@@ -5,22 +5,18 @@ action buttons (switch/skip/favorite) at bottom.
 """
 
 import logging
-from typing import Callable, Dict, Optional
+from collections.abc import Callable
 
 from PySide6.QtCore import Qt, Signal
-from PySide6.QtGui import QFont, QIcon, QPainter, QColor
+from PySide6.QtGui import QColor, QFont, QPainter
 from PySide6.QtWidgets import (
     QFrame,
-    QHBoxLayout,
-    QLabel,
     QPushButton,
     QStackedWidget,
     QToolTip,
     QVBoxLayout,
     QWidget,
 )
-
-from src.app.theme import COLOR_PINK_LIGHT
 
 logger = logging.getLogger(__name__)
 
@@ -33,7 +29,7 @@ class SidebarButton(QPushButton):
     """Single navigation button in the icon sidebar."""
 
     def __init__(self, icon_char: str, label: str, page_id: str,
-                 parent: Optional[QWidget] = None) -> None:
+                 parent: QWidget | None = None) -> None:
         super().__init__("", parent)
         self._icon_char = icon_char
         self._label = label
@@ -65,7 +61,7 @@ class SidebarButton(QPushButton):
             "}"
         )
 
-    def paintEvent(self, event):  # noqa: ANN201
+    def paintEvent(self, event):
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
 
@@ -77,13 +73,13 @@ class SidebarButton(QPushButton):
         painter.drawText(self.rect(), Qt.AlignmentFlag.AlignCenter, self._icon_char)
         painter.end()
 
-    def enterEvent(self, event):  # noqa: ANN001
+    def enterEvent(self, event):
         pos = self.mapToGlobal(self.rect().topRight())
         pos.setX(pos.x() + 8)
         QToolTip.showText(pos, self._label)
         super().enterEvent(event)
 
-    def leaveEvent(self, event):  # noqa: ANN001
+    def leaveEvent(self, event):
         QToolTip.hideText()
         super().leaveEvent(event)
 
@@ -100,7 +96,7 @@ class ActionButton(QPushButton):
     ICON_SIZE = 18
 
     def __init__(self, icon_default: str, icon_active: str, tooltip: str, action_name: str,
-                 parent: Optional[QWidget] = None) -> None:
+                 parent: QWidget | None = None) -> None:
         super().__init__("", parent)
         self._icon_default = icon_default
         self._icon_active = icon_active
@@ -125,7 +121,7 @@ class ActionButton(QPushButton):
             "}"
         )
 
-    def paintEvent(self, event):  # noqa: ANN201
+    def paintEvent(self, event):
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
         painter.setFont(QFont("Segoe UI", self.ICON_SIZE))
@@ -145,13 +141,13 @@ class ActionButton(QPushButton):
 # ---------------------------------------------------------------------------
 
 class BrandLogoWidget(QWidget):
-    def __init__(self, parent: Optional[QWidget] = None) -> None:
+    def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self.setFixedHeight(48)
         self.setFixedWidth(60)
         self.setToolTip("Wallpace")
 
-    def paintEvent(self, event):  # noqa: ANN201
+    def paintEvent(self, event):
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
 
@@ -200,17 +196,17 @@ class SidebarNavigation(QWidget):
 
     def __init__(self, stacked: QStackedWidget,
                  on_settings_open: Callable[[], None],
-                 on_action_switch: Optional[Callable[[], None]] = None,
-                 on_action_skip: Optional[Callable[[], None]] = None,
-                 on_action_favorite: Optional[Callable[[], None]] = None,
-                 parent: Optional[QWidget] = None) -> None:
+                 on_action_switch: Callable[[], None] | None = None,
+                 on_action_skip: Callable[[], None] | None = None,
+                 on_action_favorite: Callable[[], None] | None = None,
+                 parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self._stacked = stacked
         self._on_settings_open = on_settings_open
         self._on_action_switch = on_action_switch
         self._on_action_skip = on_action_skip
         self._on_action_favorite = on_action_favorite
-        self._buttons: Dict[str, SidebarButton] = {}
+        self._buttons: dict[str, SidebarButton] = {}
         self._fav_state: bool = False  # track favorite toggle
 
         self.setFixedWidth(self.WIDTH)

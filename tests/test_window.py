@@ -40,11 +40,11 @@ def app():
 @pytest.fixture
 def main_window(app, tmp_config_dir):
     """创建 MainWindow 实例（配置隔离到临时目录，避免污染真实数据）。"""
-    from src.core.settings import Settings
-    from src.core.image_library import ImageLibrary
-    from src.core.wallpaper_manager import WallpaperManager
-    from src.core.scheduler import Scheduler
     from src.app.window import MainWindow
+    from src.core.image_library import ImageLibrary
+    from src.core.scheduler import Scheduler
+    from src.core.settings import Settings
+    from src.core.wallpaper_manager import WallpaperManager
 
     settings = Settings()
     library = ImageLibrary(directories=[], extensions=set())
@@ -107,7 +107,7 @@ class TestMainWindowGallery:
     def test_refresh_gallery_with_images(self, main_window, tmp_path):
         """测试有图片时刷新。"""
         from PySide6.QtGui import QImageWriter
-        from src.core.image_library import ImageLibrary
+
 
         # 创建测试图片
         img = QImage(100, 100, QImage.Format_RGB32)
@@ -152,13 +152,13 @@ class TestMainWindowSettings:
     def test_add_directory(self, main_window, tmp_path):
         """测试添加目录。"""
         from PySide6.QtGui import QImageWriter
- 
+
         # 创建测试图片
         img = QImage(100, 100, QImage.Format_RGB32)
         img.fill(0xFF0000)
         img_path = tmp_path / "test.jpg"
         QImageWriter.write(img, str(img_path), "JPG")
- 
+
         # 模拟添加目录（绕过 QFileDialog）
         dirs = main_window._settings.get("image_directories", [])
         dirs.append(str(tmp_path))

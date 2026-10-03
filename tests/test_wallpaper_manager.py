@@ -10,7 +10,6 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 
 from core.desktop_wallpaper_com import MonitorInfo
 from core.wallpaper_manager import (
-    SPI_SETDESKWALLPAPER,
     WallpaperManager,
 )
 

@@ -10,7 +10,7 @@ import os
 import shutil
 from datetime import datetime
 from pathlib import Path
-from typing import Any, List, Optional
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -65,7 +65,7 @@ class Settings:
     平滑迁移，保证用户既有配置（尤其是 image_directories）不丢失。
     """
 
-    def __init__(self, config_path: Optional[Path] = None) -> None:
+    def __init__(self, config_path: Path | None = None) -> None:
         """初始化配置管理器。
 
         Args:
@@ -77,7 +77,7 @@ class Settings:
         self._data: dict = {}
         self._dirty = False  # 是否存在 defer 后尚未落盘的改动
         # G04：加载异常（配置损坏已备份/重置）时的可读提示；正常加载时为 None。
-        self.load_warning: Optional[str] = None
+        self.load_warning: str | None = None
         self.load()
 
     # ==================== 公开方法 ====================
@@ -96,7 +96,7 @@ class Settings:
         self.load_warning = None
         try:
             if self.config_path.exists():
-                with open(self.config_path, "r", encoding="utf-8") as f:
+                with open(self.config_path, encoding="utf-8") as f:
                     raw = json.load(f)
                 if not isinstance(raw, dict):
                     logger.warning("配置根对象必须是对象，使用默认配置")
@@ -136,7 +136,7 @@ class Settings:
             if not legacy.exists():
                 continue
             try:
-                with open(legacy, "r", encoding="utf-8") as f:
+                with open(legacy, encoding="utf-8") as f:
                     raw = json.load(f)
             except (json.JSONDecodeError, OSError):
                 logger.warning("读取旧配置失败: %s", legacy)
@@ -150,7 +150,7 @@ class Settings:
             return True
         return False
 
-    def save(self, data: Optional[dict] = None) -> None:
+    def save(self, data: dict | None = None) -> None:
         """持久化配置到磁盘（原子写）。
 
         先写同目录临时文件、fsync 落盘，再用 os.replace 原子替换正式文件。
@@ -250,7 +250,7 @@ class Settings:
         return dict(self._data)
 
     @staticmethod
-    def validate(data: dict) -> List[str]:
+    def validate(data: dict) -> list[str]:
         """校验配置合法性，不修改数据。
 
         Args:
@@ -259,7 +259,7 @@ class Settings:
         Returns:
             错误消息列表；空列表表示校验通过。
         """
-        errors: List[str] = []
+        errors: list[str] = []
         mode = data.get("switch_mode")
 
         # --- image_directories ---
@@ -269,7 +269,7 @@ class Settings:
         else:
             for d in dirs:
                 if not isinstance(d, str) or not d.strip():
-                    errors.append(f"'image_directories' 中的路径不能为空字符串")
+                    errors.append("'image_directories' 中的路径不能为空字符串")
 
         # --- switch_mode ---
         if mode not in VALID_SWITCH_MODES:
@@ -342,7 +342,7 @@ class Settings:
             )
         logger.warning("%s", self.load_warning)
 
-    def _backup_corrupt_config(self) -> Optional[Path]:
+    def _backup_corrupt_config(self) -> Path | None:
         """把损坏的配置文件备份为 ``config.json.corrupt-YYYYMMDD-HHMMSS``。
 
         - 内容与原文件逐字节一致（``shutil.copy2``）。

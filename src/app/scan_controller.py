@@ -10,7 +10,7 @@
 """
 
 import logging
-from typing import TYPE_CHECKING, Optional
+from typing import TYPE_CHECKING
 
 from PySide6.QtCore import QObject, QRunnable, QThreadPool, Signal, Slot
 
@@ -65,7 +65,7 @@ class ScanController(QObject):
     finished = Signal(list)     # 扫描完成 → MainWindow._on_scan_finished(list)
 
     def __init__(
-        self, library: "ImageLibrary", parent: Optional[QObject] = None
+        self, library: "ImageLibrary", parent: QObject | None = None
     ) -> None:
         super().__init__(parent)
         self._library = library

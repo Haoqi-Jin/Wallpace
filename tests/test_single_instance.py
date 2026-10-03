@@ -21,7 +21,7 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from src.core.single_instance import (  # noqa: E402
+from src.core.single_instance import (
     ACTIVATE_MESSAGE,
     LOCAL_SOCKET_AVAILABLE,
     SingleInstanceGuard,
@@ -105,7 +105,7 @@ class TestActivationMessage:
         first.set_activate_callback(lambda: received.append("activate"))
         assert first.try_acquire() is True
         try:
-            if not LOCAL_SOCKET_AVAILABLE or first._server is None:  # noqa: SLF001
+            if not LOCAL_SOCKET_AVAILABLE or first._server is None:
                 pytest.skip(
                     "QLocalServer 在本环境不可用（QtNetwork 被裁剪，或本地套接字"
                     "被禁用/无头环境无法监听），真实通路用例跳过；"
@@ -135,7 +135,7 @@ class TestActivatePureLogic:
         )
         received: list = []
         guard.set_activate_callback(lambda: received.append("go"))
-        guard._on_socket_ready(_FakeSocket(ACTIVATE_MESSAGE))  # noqa: SLF001
+        guard._on_socket_ready(_FakeSocket(ACTIVATE_MESSAGE))
         assert received == ["go"]
 
     def test_unrelated_message_is_ignored(self):
@@ -144,7 +144,7 @@ class TestActivatePureLogic:
         )
         received: list = []
         guard.set_activate_callback(lambda: received.append("go"))
-        guard._on_socket_ready(_FakeSocket(b"something-else"))  # noqa: SLF001
+        guard._on_socket_ready(_FakeSocket(b"something-else"))
         assert received == []
 
     def test_callback_exception_does_not_propagate(self):
@@ -158,7 +158,7 @@ class TestActivatePureLogic:
 
         guard.set_activate_callback(boom)
         # 不得抛出
-        guard._on_socket_ready(_FakeSocket(ACTIVATE_MESSAGE))  # noqa: SLF001
+        guard._on_socket_ready(_FakeSocket(ACTIVATE_MESSAGE))
 
 
 class TestDegradationGuard:

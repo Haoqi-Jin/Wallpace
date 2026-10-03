@@ -7,8 +7,8 @@ import sys
 from pathlib import Path
 
 import pytest
-from PySide6.QtWidgets import QApplication
 from PySide6.QtGui import QImage, QImageWriter
+from PySide6.QtWidgets import QApplication
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 

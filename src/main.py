@@ -139,8 +139,8 @@ def main() -> None:
         sys.exit(0)
 
     # Phase 1: 核心模块初始化
-    from src.core.settings import Settings
     from src.core.image_library import ImageLibrary
+    from src.core.settings import Settings
     from src.core.wallpaper_manager import WallpaperManager
 
     settings = Settings()

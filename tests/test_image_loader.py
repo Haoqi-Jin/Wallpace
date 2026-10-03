@@ -10,9 +10,10 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 
-from src.app import image_loader
-from PySide6.QtCore import QSize, QCoreApplication
+from PySide6.QtCore import QCoreApplication, QSize
 from PySide6.QtGui import QImage
+
+from src.app import image_loader
 
 
 @pytest.fixture(autouse=True)

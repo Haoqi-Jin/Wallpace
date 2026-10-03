@@ -1,4 +1,4 @@
-"""src/core/autostart_registry — Windows 开机自启注册表管理。
+r"""src/core/autostart_registry — Windows 开机自启注册表管理。
 
 通过 HKCU\Software\Microsoft\Windows\CurrentVersion\Run 写入/移除自启项。
 仅当前用户可见，不需要管理员权限。
@@ -6,7 +6,7 @@
 
 import logging
 import sys
-from typing import TYPE_CHECKING, Optional
+from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:  # pragma: nocover
     pass

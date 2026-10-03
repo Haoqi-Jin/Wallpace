@@ -1,7 +1,7 @@
 """src/app/tray.py — 系统托盘图标和右键菜单。"""
 
 import logging
-from typing import TYPE_CHECKING, Optional
+from typing import TYPE_CHECKING
 
 from PySide6.QtGui import QAction
 from PySide6.QtWidgets import QMenu, QSystemTrayIcon, QWidget
@@ -21,7 +21,7 @@ class TrayIcon(QSystemTrayIcon):
     """
 
     def __init__(self, main_window: "MainWindow",
-                 parent: Optional[QWidget] = None) -> None:
+                 parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self._main_window = main_window
         self._is_paused = False

@@ -10,7 +10,7 @@
 """
 
 import logging
-from typing import Callable, Optional
+from collections.abc import Callable
 
 from PySide6.QtCore import QSize, Qt, Signal, Slot
 from PySide6.QtGui import QPixmap
@@ -40,7 +40,7 @@ class GalleryThumbWidget(QLabel):
         self,
         image_path: str,
         is_current: bool = False,
-        parent: Optional[QWidget] = None,
+        parent: QWidget | None = None,
     ) -> None:
         super().__init__(parent)
         self._image_path = image_path
@@ -82,7 +82,7 @@ class GalleryThumbWidget(QLabel):
         self._is_current = current
         self._apply_style()
 
-    def mousePressEvent(self, event) -> None:  # noqa: ANN001
+    def mousePressEvent(self, event) -> None:
         if event.button() == Qt.MouseButton.LeftButton:
             self.clicked.emit(self._image_path)
         super().mousePressEvent(event)
@@ -105,7 +105,7 @@ class GalleryStrip(QWidget):
     def __init__(
         self,
         on_select: Callable[[str], None],
-        parent: Optional[QWidget] = None,
+        parent: QWidget | None = None,
     ) -> None:
         super().__init__(parent)
         self._on_select = on_select
@@ -206,7 +206,7 @@ class GalleryStrip(QWidget):
         self._items.extend(batch)
 
     @Slot()
-    def _maybe_load_more(self, *args) -> None:  # noqa: ANN002
+    def _maybe_load_more(self, *args) -> None:
         """滚动接近右端时追加下一批缩略图（懒加载）。"""
         if not self._pending:
             return

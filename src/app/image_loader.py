@@ -43,8 +43,8 @@ import logging
 import os
 import threading
 from collections import OrderedDict
+from collections.abc import Callable
 from pathlib import Path
-from typing import Callable, Dict, List, Optional, Tuple
 
 from PySide6.QtCore import QObject, QRunnable, QSize, QThreadPool, QTimer, Signal
 from PySide6.QtGui import QImage, QImageReader
@@ -69,10 +69,10 @@ class _BroadcastSubscription:
     导致 P0-1 长期潜伏。这里返回一个可退订的包装对象，行为与预期一致。
     """
 
-    __slots__ = ("_slot", "_active")
+    __slots__ = ("_active", "_slot")
 
     def __init__(self, slot: _ReadyCallback) -> None:
-        self._slot: Optional[_ReadyCallback] = slot
+        self._slot: _ReadyCallback | None = slot
         self._active: bool = True
 
     def disconnect(self) -> None:
@@ -91,23 +91,23 @@ class _BroadcastSubscription:
 
 # 模块级单例
 _signals: _LoaderSignals = _LoaderSignals()
-_pool: Optional[QThreadPool] = None
+_pool: QThreadPool | None = None
 
 # --- 按 path 分发的订阅表 ---
 # path -> [callback, ...]。解码完成（或失败）后该 path 的条目会被整体清空，
 # 即订阅是"一次性"的：同一个 path 再次 load_async 会重新登记。
-_subscribers: Dict[str, List[_ReadyCallback]] = {}
+_subscribers: dict[str, list[_ReadyCallback]] = {}
 _subscribers_lock: threading.Lock = threading.Lock()
 
 # --- 兼容用的全局广播列表 ---
-_broadcast: List[_ReadyCallback] = []
+_broadcast: list[_ReadyCallback] = []
 _broadcast_lock: threading.Lock = threading.Lock()
 
 # --- 缩略图内存 LRU 缓存（#12） ---
 # 只缓存 QImage（CPU 侧、跨线程安全的隐式共享位图），**绝不缓存 QPixmap**
 # —— QPixmap 依赖 GUI 线程的 backing store，只能在它所属的线程构造/使用，
 # 而解码发生在 QThreadPool 工作线程；QPixmap 转换必须留在 GUI 线程。
-_CacheKey = Tuple[str, int, int, int]  # (resolved_path, st_mtime_ns, width, height)
+_CacheKey = tuple[str, int, int, int]  # (resolved_path, st_mtime_ns, width, height)
 
 
 class _ImageCache:
@@ -122,7 +122,7 @@ class _ImageCache:
     def __init__(
         self, max_entries: int = 512, max_bytes: int = 128 * 1024 * 1024
     ) -> None:
-        self._store: "OrderedDict[_CacheKey, QImage]" = OrderedDict()
+        self._store: OrderedDict[_CacheKey, QImage] = OrderedDict()
         self._lock: threading.Lock = threading.Lock()
         self.max_entries: int = max(1, int(max_entries))
         self.max_bytes: int = max(0, int(max_bytes))
@@ -130,7 +130,7 @@ class _ImageCache:
         self._hits: int = 0
         self._misses: int = 0
 
-    def get(self, key: Optional[_CacheKey]) -> Optional[QImage]:
+    def get(self, key: _CacheKey | None) -> QImage | None:
         """按键取值；命中返回 QImage 并标记最近使用，未命中返回 None。"""
         if key is None:
             return None
@@ -143,7 +143,7 @@ class _ImageCache:
             self._hits += 1
             return image
 
-    def put(self, key: Optional[_CacheKey], image: Optional[QImage]) -> None:
+    def put(self, key: _CacheKey | None, image: QImage | None) -> None:
         """写入缓存，随后按双上限淘汰直至满足约束。"""
         if key is None or image is None:
             return
@@ -182,7 +182,7 @@ class _ImageCache:
             self._hits = 0
             self._misses = 0
 
-    def stats(self) -> Dict[str, int]:
+    def stats(self) -> dict[str, int]:
         """返回 ``{"entries", "bytes", "hits", "misses"}`` 快照。"""
         with self._lock:
             return {
@@ -196,7 +196,7 @@ class _ImageCache:
 _cache: _ImageCache = _ImageCache()
 
 
-def _make_key(path: str, target_size: Optional[QSize]) -> Optional[_CacheKey]:
+def _make_key(path: str, target_size: QSize | None) -> _CacheKey | None:
     """构造缓存键 ``(resolved_path, st_mtime_ns, width, height)``。
 
     ``mtime_ns`` 用于感知"同名文件被替换"——否则改写内容后会一直命中旧图；
@@ -224,7 +224,7 @@ def configure_cache(
     _cache.configure(max_entries, max_bytes)
 
 
-def cache_stats() -> Dict[str, int]:
+def cache_stats() -> dict[str, int]:
     """返回当前缓存统计：``{"entries", "bytes", "hits", "misses"}``。"""
     return _cache.stats()
 
@@ -243,7 +243,7 @@ def _get_pool() -> QThreadPool:
     return _pool
 
 
-def _remove_broadcast(slot: Optional[_ReadyCallback]) -> None:
+def _remove_broadcast(slot: _ReadyCallback | None) -> None:
     """从广播列表中移除槽（内部辅助，不存在时静默忽略）。"""
     if slot is None:
         return
@@ -342,7 +342,7 @@ class _DecodeJob(QRunnable):
         self,
         path: str,
         target_size: QSize,
-        key: Optional[_CacheKey] = None,
+        key: _CacheKey | None = None,
     ) -> None:
         super().__init__()
         self._path = path
@@ -383,8 +383,8 @@ def _discard(path: str) -> None:
 
 def load_async(
     path: str,
-    target_size: Optional[QSize] = None,
-    on_ready: Optional[_ReadyCallback] = None,
+    target_size: QSize | None = None,
+    on_ready: _ReadyCallback | None = None,
 ) -> None:
     """异步解码图片，完成后只回调该 path 的订阅者（再广播给全局监听者）。
 

@@ -27,8 +27,8 @@ from __future__ import annotations
 
 import logging
 import time
+from collections.abc import Callable
 from pathlib import Path
-from typing import Callable, Optional
 
 from PySide6.QtCore import QCoreApplication, QLockFile
 
@@ -88,7 +88,7 @@ class SingleInstanceGuard:
 
     def __init__(
         self,
-        lock_path: Optional[Path] = None,
+        lock_path: Path | None = None,
         server_name: str = DEFAULT_SERVER_NAME,
         stale_lock_ms: int = _STALE_LOCK_MS,
     ) -> None:
@@ -104,11 +104,11 @@ class SingleInstanceGuard:
         self._server_name: str = server_name
         self._stale_lock_ms: int = stale_lock_ms
 
-        self._lock: Optional[QLockFile] = None
-        self._server: Optional[QLocalServer] = None
+        self._lock: QLockFile | None = None
+        self._server: QLocalServer | None = None
         self._activated: bool = False
         self._degraded: bool = False
-        self._activate_callback: Optional[Callable[[], None]] = None
+        self._activate_callback: Callable[[], None] | None = None
 
     # ------------------------------------------------------------------ #
     # 状态查询
@@ -128,7 +128,7 @@ class SingleInstanceGuard:
         """本地服务名（测试/调试用）。"""
         return self._server_name
 
-    def set_activate_callback(self, callback: Optional[Callable[[], None]]) -> None:
+    def set_activate_callback(self, callback: Callable[[], None] | None) -> None:
         """注册"第二实例请求唤醒"时的回调（通常是主窗口的 bring_to_front）。
 
         Args:
@@ -159,7 +159,7 @@ class SingleInstanceGuard:
             # tryLock 返回 False = 锁被另一个活着的进程持有。
             logger.info("检测到已有 Wallpace 实例在运行（锁: %s）", self._lock_path)
             return False
-        except Exception:  # noqa: BLE001 —— 降级护栏：绝不让锁问题阻断启动
+        except Exception:
             logger.exception("单实例检测失败，降级为允许启动（本次不做单实例保护）")
             self._degraded = True
             return True
@@ -199,7 +199,7 @@ class SingleInstanceGuard:
             sock.disconnectFromServer()
             logger.info("已请求已有实例激活主窗口")
             return True
-        except Exception:  # noqa: BLE001
+        except Exception:
             logger.exception("通知已有实例失败（忽略，直接退出）")
             return False
 
@@ -211,12 +211,12 @@ class SingleInstanceGuard:
                 if QLocalServer is not None:
                     QLocalServer.removeServer(self._server_name)
                 self._server = None
-        except Exception:  # noqa: BLE001
+        except Exception:
             logger.exception("关闭单实例本地服务失败")
         try:
             if self._lock is not None and self._activated:
                 self._lock.unlock()
-        except Exception:  # noqa: BLE001
+        except Exception:
             logger.exception("释放单实例锁失败")
         finally:
             self._activated = False
@@ -258,7 +258,7 @@ class SingleInstanceGuard:
                 return
             server.newConnection.connect(self._on_new_connection)
             self._server = server
-        except Exception:  # noqa: BLE001
+        except Exception:
             logger.exception("启动单实例本地服务失败，唤醒功能不可用")
 
     def _on_new_connection(self) -> None:
@@ -274,7 +274,7 @@ class SingleInstanceGuard:
                 sock.readyRead.connect(lambda s=sock: self._on_socket_ready(s))
                 if sock.bytesAvailable():
                     self._on_socket_ready(sock)
-        except Exception:  # noqa: BLE001
+        except Exception:
             logger.exception("处理单实例连接失败")
 
     def _on_socket_ready(self, sock: QLocalSocket) -> None:
@@ -287,7 +287,7 @@ class SingleInstanceGuard:
             # 实测：socket 的 C++ 对象可能在 disconnected/清理后被删除，
             # 此时再触碰会抛 "Internal C++ object already deleted"，忽略即可。
             return
-        except Exception:  # noqa: BLE001
+        except Exception:
             logger.exception("读取单实例消息失败")
             return
         finally:
@@ -305,5 +305,5 @@ class SingleInstanceGuard:
         try:
             callback()
             logger.info("已响应 activate，主窗口已尝试恢复前台")
-        except Exception:  # noqa: BLE001
+        except Exception:
             logger.exception("响应 activate 回调失败")
