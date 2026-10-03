@@ -10,7 +10,7 @@
        两个 pytest 会话共享同一个固定 basetemp 时，``tmp_path_factory`` 的
        ``rm_rf(basetemp) + mkdir()`` 会互相打架。实测：并发运行两个会话，
        A 会话 44 passed 干净；B 会话崩出 ``28 passed + 16 errors``（或 30+14），
-       错误均为 fixture setup 阶段的 ``OSError [Errno 53] 找不到网络路径`` /
+       错误均为 fixture setup 阶段的 ``OSError [WinError 53]`` /
        ``[safe-delete] trash-failed``。换成两个唯一 basetemp 并发跑同一子集 →
        两边都干净（44 passed × 2）。→ 根因是"并发 + 共享固定 basetemp"。
     ② pytest 默认 basetemp（``%TEMP%/pytest-of-<user>/...``，本机 = C:\\msys2-tmp）：
@@ -19,36 +19,43 @@
        并抛 OSError，导致进程退出码 = 1。连跑两轮实测：一轮 exit 0、一轮 exit 1，
        不稳定，不能作为默认。
     结论：改用"仓库内 ``.pytest-tmp/`` + 每次运行唯一（pid + 时间戳）"：
-        - 唯一化 → 从根上消除并发冲突；
+        - 唯一化 → 从根上消除并发冲突（**这是本文件保留的唯一理由**）；
         - 显式 basetemp → pytest 不做 garbage 轮转清理，规避 safe-delete 干扰；
         - 仍在仓库内 → 规避 %TEMP% 含非 ASCII（靳浩祺）与外部清理的不确定性。
 
-注意：显式 basetemp 不会被 pytest 在退出时删除，故历史 ``run-*`` 目录会累积，
-      但均在 ``.pytest-tmp/``（已 gitignore）下，可由开发者/CI 手动清理。
-      这里做**有界回收**：每次分配完本次目录后，删掉旧的 ``run-*``，只保留
-      最近 3 个（含本次）。回收是纯 best-effort，**任何异常都静默吞掉**——
-      本开发环境的 safe-delete 包装器对批量删除会抛 ``SystemExit``
-      （BaseException，常规 ``except Exception`` 拦不住），曾在 configure 阶段
-      把整个 pytest 直接打断（内部错误退出码 3）。因此这里一律用
-      ``except BaseException``：清理失败最坏只是目录多留几个，**绝不影响测试**。
+为什么**不做**自动清理历史 ``run-*``（曾实现，后回退）
+    曾经的顾虑是"显式 basetemp 不会被 pytest 清理，run-* 会无限堆积"。实测证明
+    这个回收本身就是**病理性的慢**，且代价远大于收益：
+
+        同一台机、同一命令 ``pytest --collect-only``，只切换清理开关：
+            关闭自动清理 →  **1.90s**（265 tests collected）
+            开启自动清理 →  **170s 内跑不完，被杀**
+
+    机理：每个 ``run-*`` 约 205 个文件，超过本机 safe-delete 包装器 50 文件的
+    批量删除阈值 → 抛 ``SystemExit``。虽然被 ``except BaseException`` 吞掉
+    （确实不会打断测试），但包装器在**失败路径上会重试**，十来个目录的重试
+    叠加 ≈ 数分钟，**全部耗在 conftest 的 configure 阶段**，导致门禁根本跑不动。
+    注意"每次最多删 N 个"并不能解决：单目录就约 1 分钟，限量只是把常数变小，
+    没有消除"在启动路径上做批量 IO"这个病根。
+
+    判据：为一个 gitignored 的缓存目录（堆积只占磁盘、可随时手动删），
+    代价是"每次测试运行可能整体卡死"——这笔账不划算。
+
+    **手工清理方式**（唯一推荐方式）：
+        rm -rf .pytest-tmp
+
+    唯一性由本文件在 configure 阶段保证（每次运行分配新的 run-<pid>-<ts> 目录），
+    所以**不需要**固定的 ``--basetemp``；``pytest.ini`` 中也不应再出现它。
 """
 
 from __future__ import annotations
 
 import os
-import re
-import shutil
 import time
 from pathlib import Path
 
 _REPO_ROOT = Path(__file__).resolve().parent
 _BASETEMP_ROOT = _REPO_ROOT / ".pytest-tmp"
-
-# 只认我们自己按 ``run-<pid>-<毫秒时间戳>`` 命名的目录，绝不误伤其它任何东西。
-_RUN_DIR_RE = re.compile(r"run-\d+-\d+")
-
-# 磁盘上最多保留几个 run-* （含本次）。
-_KEEP_RECENT_RUNS = 3
 
 
 def pytest_configure(config) -> None:
@@ -61,37 +68,3 @@ def pytest_configure(config) -> None:
     _BASETEMP_ROOT.mkdir(parents=True, exist_ok=True)
     unique = _BASETEMP_ROOT / f"run-{os.getpid()}-{int(time.time() * 1000)}"
     config.option.basetemp = str(unique)
-    # 回收旧的 run-*。此处本次目录尚未被 pytest 创建，因此只保留
-    # ``_KEEP_RECENT_RUNS - 1`` 个旧的 —— 加上随后创建的本次目录，磁盘上
-    # 总数正好 ≤ _KEEP_RECENT_RUNS。
-    _prune_old_runs(_BASETEMP_ROOT, keep=_KEEP_RECENT_RUNS - 1)
-
-
-def _prune_old_runs(root: Path, keep: int) -> None:
-    """回收 ``root`` 下最旧的 ``run-*`` 目录，最多保留 ``keep`` 个（按 mtime 新旧）。
-
-    边界（重要）：只处理 ``root`` **直属**、且目录名**严格**匹配
-    ``run-<数字>-<数字>`` 的子目录；不递归、不跟随符号链接、不碰其它任何路径。
-    这不是"清临时文件"，而是回收我们自己产生的垃圾。
-
-    全程 best-effort：捕获 ``BaseException``（含 ``SystemExit``）并静默跳过，
-    任何清理失败都不允许影响测试运行。
-    """
-    try:
-        if not root.is_dir():
-            return
-        runs = [
-            p
-            for p in root.iterdir()
-            if p.is_dir() and not p.is_symlink() and _RUN_DIR_RE.fullmatch(p.name)
-        ]
-        # mtime 降序：最新的在前。keep<=0 时全删；keep>=总数时全留。
-        runs.sort(key=lambda p: p.stat().st_mtime, reverse=True)
-        for stale in runs[max(keep, 0) :]:
-            try:
-                shutil.rmtree(stale)
-            except BaseException:  # noqa: BLE001, B036 —— 清理失败必须静默
-                pass
-    except BaseException:  # noqa: BLE001, B036 —— 兜底：绝不因清理打断 pytest
-        pass
-
