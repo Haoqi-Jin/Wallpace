@@ -1,6 +1,6 @@
 """src/app/widgets/preview_card.py -- Wallpaper preview card component.
 
-Shows current wallpaper thumbnail, filename, path + index overlay, 
+Shows current wallpaper thumbnail, filename, path + index overlay,
 and transition operations.
 """
 
