@@ -198,6 +198,9 @@ class TestBroadcastSubscription:
             sub.disconnect()  # 幂等，重复调用不抛
         finally:
             sub.disconnect()
+
+
+class TestImageLoaderDecode:
     """测试实际图片解码（需要 QApplication 实例）。"""
 
     @pytest.fixture(autouse=True)
