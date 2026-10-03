@@ -257,8 +257,8 @@ class Scheduler:
         try:
             h, m = map(int, time_str.split(":"))
             return dt_time(h, m)
-        except (ValueError, AttributeError):
-            raise ValueError(f"无效时间格式 '{time_str}'，应为 HH:MM")
+        except (ValueError, AttributeError) as e:
+            raise ValueError(f"无效时间格式 '{time_str}'，应为 HH:MM") from e
 
     def _start_daily_timer(self) -> None:
         now = datetime.now()
