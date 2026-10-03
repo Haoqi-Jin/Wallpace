@@ -99,6 +99,23 @@ class TestSchedulerInit:
         assert s.is_active is False
         assert s.is_paused is False
 
+    def test_timer_slot_starts_as_none(self):
+        """锁住 ``_timer`` 注解所表达的意图：构造后是一个 None 初始化的定时器槽位。
+
+        ⚠️ **这不是"证明 F821 修复"的证据，请勿误读**：
+        ``self._timer: QTimer | None`` 是**函数体内的属性注解**，CPython 运行时
+        既不求值也不存储（只有模块/类级的简单名注解才会），所以无论
+        ``QTimer`` 是否可解析，本用例在修复前后都会通过、无法区分。
+
+        F821 真正的证明是静态门禁本身：``ruff --select F821`` 归零 + mypy 阻塞。
+        本用例的价值仅在于：若将来有人把 ``_timer`` 改成构造时即实例化、
+        或删除该槽位，这里会先失败。
+        """
+        from src.core.scheduler import Scheduler
+
+        s = Scheduler()
+        assert s._timer is None
+
 
 # ==================== 手动触发测试 ====================
 

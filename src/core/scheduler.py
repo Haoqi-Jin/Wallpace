@@ -17,6 +17,12 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:  # pragma: nocover
+    # QTimer 只在注解里被引用，运行期不求值（函数体内属性注解不求值），
+    # 故放 TYPE_CHECKING 即可满足 F821/mypy。
+    # 刻意**不**加顶层 Qt 导入：本文件 _start_timer/_pause_timers（第 286/295 行）
+    # 采用函数内延迟导入 QTimer，顶层导入会改变导入期行为并可能引入循环导入。
+    from PySide6.QtCore import QTimer
+
     from src.core.image_library import ImageLibrary
     from src.core.wallpaper_manager import WallpaperManager
 
