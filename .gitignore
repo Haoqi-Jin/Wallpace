@@ -66,3 +66,6 @@ CODEX_SESSION.md
 
 # Mockups (optional, can keep if needed)
 # mockups/
+
+# Playwright MCP 会话产物
+.playwright-mcp/
