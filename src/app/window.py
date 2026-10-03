@@ -534,11 +534,12 @@ class MainWindow(QMainWindow):
         """启动一个定时器，每秒更新时钟显示."""
         # 如果有已存在的定时器，先停止并清理
         if self._clock_timer is not None:
-            # 收窄到 RuntimeError 而非裸 except：这是**具体的 Qt API 调用**，
-            # 失败模式明确——C++ 对象已销毁时 PySide6 抛
-            # RuntimeError: "Internal C++ object (QTimer) already deleted"（已实测）。
-            # 与本仓库既有约定一致（src/ 下 14 处 `except RuntimeError`，
-            # 含同属定时器子系统的 scheduler.py:328/378）。
+            # 收窄到 RuntimeError 而非裸 except：这是具体的 Qt API 调用，失败模式明确
+            # —— C++ 对象已销毁时 PySide6 抛 RuntimeError（"Internal C++ object ...
+            # already deleted"，已实测）。本仓库已有多处同类处理（含 scheduler.py
+            # 的定时器生命周期），裸 except 在这里是少数派。
+            # 注：注释刻意不写"共 N 处"这类计数与行号——它们会随改动腐烂，
+            # 而读者会当成现状。
             try:
                 self._clock_timer.stop()
             except RuntimeError:
