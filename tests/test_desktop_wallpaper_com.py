@@ -5,6 +5,7 @@
 不可用时优雅返回 ``False`` / ``[]``，且 ``release()`` 幂等。
 """
 
+import dataclasses
 import sys
 from pathlib import Path
 
@@ -56,5 +57,5 @@ class TestMonitorInfo:
         mon = MonitorInfo(id="dev-1", device_path="dev-1")
         assert mon.id == "dev-1"
         assert mon.device_path == "dev-1"
-        with pytest.raises(Exception):
+        with pytest.raises(dataclasses.FrozenInstanceError):
             mon.id = "other"  # frozen：不可变
