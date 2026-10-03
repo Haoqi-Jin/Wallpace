@@ -174,7 +174,15 @@ class GalleryStrip(QWidget):
         self._append_batch()  # 首批 THUMB_BATCH 张
 
     def set_current(self, path: str) -> None:
-        """高亮当前选中项（其余取消高亮）。"""
+        """高亮当前选中项（其余取消高亮），并同步记录当前路径。
+
+        ``_current_path`` 必须一并更新：懒加载的 ``_append_batch()`` 正是用它
+        判定新批次缩略图的高亮（``is_current=(img_path == self._current_path)``）。
+        历史上这里只改已存在的 widget、不回写该字段，于是"切换到 A → 滚动触发
+        懒加载追加新批次"时，新批次仍按**陈旧路径**判定，导致同屏出现两个高亮项
+        （QA 审计结论 1：慢加载批次高亮漂移）。
+        """
+        self._current_path = path
         for idx in range(self._thumbs_layout.count()):
             item = self._thumbs_layout.itemAt(idx)
             widget = item.widget() if item is not None else None
