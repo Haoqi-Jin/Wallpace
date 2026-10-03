@@ -25,19 +25,30 @@
 
 注意：显式 basetemp 不会被 pytest 在退出时删除，故历史 ``run-*`` 目录会累积，
       但均在 ``.pytest-tmp/``（已 gitignore）下，可由开发者/CI 手动清理。
-      这里**不做自动清理**：本开发环境的 safe-delete 包装器对批量删除会抛
-      ``SystemExit``（BaseException，常规 ``except Exception`` 拦不住），
-      曾在 configure 阶段把整个 pytest 直接打断（内部错误退出码 3）。
+      这里做**有界回收**：每次分配完本次目录后，删掉旧的 ``run-*``，只保留
+      最近 3 个（含本次）。回收是纯 best-effort，**任何异常都静默吞掉**——
+      本开发环境的 safe-delete 包装器对批量删除会抛 ``SystemExit``
+      （BaseException，常规 ``except Exception`` 拦不住），曾在 configure 阶段
+      把整个 pytest 直接打断（内部错误退出码 3）。因此这里一律用
+      ``except BaseException``：清理失败最坏只是目录多留几个，**绝不影响测试**。
 """
 
 from __future__ import annotations
 
 import os
+import re
+import shutil
 import time
 from pathlib import Path
 
 _REPO_ROOT = Path(__file__).resolve().parent
 _BASETEMP_ROOT = _REPO_ROOT / ".pytest-tmp"
+
+# 只认我们自己按 ``run-<pid>-<毫秒时间戳>`` 命名的目录，绝不误伤其它任何东西。
+_RUN_DIR_RE = re.compile(r"run-\d+-\d+")
+
+# 磁盘上最多保留几个 run-* （含本次）。
+_KEEP_RECENT_RUNS = 3
 
 
 def pytest_configure(config) -> None:
@@ -50,3 +61,37 @@ def pytest_configure(config) -> None:
     _BASETEMP_ROOT.mkdir(parents=True, exist_ok=True)
     unique = _BASETEMP_ROOT / f"run-{os.getpid()}-{int(time.time() * 1000)}"
     config.option.basetemp = str(unique)
+    # 回收旧的 run-*。此处本次目录尚未被 pytest 创建，因此只保留
+    # ``_KEEP_RECENT_RUNS - 1`` 个旧的 —— 加上随后创建的本次目录，磁盘上
+    # 总数正好 ≤ _KEEP_RECENT_RUNS。
+    _prune_old_runs(_BASETEMP_ROOT, keep=_KEEP_RECENT_RUNS - 1)
+
+
+def _prune_old_runs(root: Path, keep: int) -> None:
+    """回收 ``root`` 下最旧的 ``run-*`` 目录，最多保留 ``keep`` 个（按 mtime 新旧）。
+
+    边界（重要）：只处理 ``root`` **直属**、且目录名**严格**匹配
+    ``run-<数字>-<数字>`` 的子目录；不递归、不跟随符号链接、不碰其它任何路径。
+    这不是"清临时文件"，而是回收我们自己产生的垃圾。
+
+    全程 best-effort：捕获 ``BaseException``（含 ``SystemExit``）并静默跳过，
+    任何清理失败都不允许影响测试运行。
+    """
+    try:
+        if not root.is_dir():
+            return
+        runs = [
+            p
+            for p in root.iterdir()
+            if p.is_dir() and not p.is_symlink() and _RUN_DIR_RE.fullmatch(p.name)
+        ]
+        # mtime 降序：最新的在前。keep<=0 时全删；keep>=总数时全留。
+        runs.sort(key=lambda p: p.stat().st_mtime, reverse=True)
+        for stale in runs[max(keep, 0) :]:
+            try:
+                shutil.rmtree(stale)
+            except BaseException:  # noqa: BLE001, B036 —— 清理失败必须静默
+                pass
+    except BaseException:  # noqa: BLE001, B036 —— 兜底：绝不因清理打断 pytest
+        pass
+
