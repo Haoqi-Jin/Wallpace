@@ -288,9 +288,8 @@ class Settings:
 
         # --- interval_minutes ---
         interval = data.get("interval_minutes")
-        if interval is not None:
-            if not isinstance(interval, int) or interval <= 0:
-                errors.append("'interval_minutes' 必须是正整数或 null")
+        if interval is not None and (not isinstance(interval, int) or interval <= 0):
+            errors.append("'interval_minutes' 必须是正整数或 null")
 
         # --- skip_list / favorites ---
         for field in ("skip_list", "favorites"):

@@ -94,6 +94,5 @@ class TrayIcon(QSystemTrayIcon):
 
     def on_activated(self, reason: int) -> None:
         """左键点击托盘图标快速切一张。"""
-        if reason == 1:
-            if not self._is_paused:
-                self._main_window.request_switch()
+        if reason == 1 and not self._is_paused:
+            self._main_window.request_switch()

@@ -856,9 +856,8 @@ class MainWindow(QMainWindow):
         mode = "per_monitor" if checked else "unified"
         self._settings.set("wallpaper_mode", mode)
         logger.info("壁纸模式切换为: %s", mode)
-        if checked and self._is_per_monitor_mode():
-            if not self._switch_per_monitor():
-                self.show_platform_warning("逐屏壁纸应用失败，已回退为统一壁纸")
+        if checked and self._is_per_monitor_mode() and not self._switch_per_monitor():
+            self.show_platform_warning("逐屏壁纸应用失败，已回退为统一壁纸")
 
     def _persist_skip_favorites(self) -> None:
         """将当前 skip/favorites 集合批量写回配置（单次保存）。"""
