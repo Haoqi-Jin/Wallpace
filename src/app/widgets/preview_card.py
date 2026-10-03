@@ -183,14 +183,6 @@ class PreviewCardWidget(QWidget):
         self._total_count = total
 
         file_name = Path(image_path).stem
-        file_size = ""
-        try:
-            stat = Path(image_path).stat()
-            size_kb = stat.st_size / 1024
-            file_size = f"{size_kb:.0f} KB"
-        except OSError:
-            pass
-
         self.filename_label.setText(file_name)
         self.path_label.setText(str(Path(image_path).parent))
         self.index_label.setText(f"{index + 1} / {total}")
