@@ -6,6 +6,7 @@ r"""src/core/autostart_registry — Windows 开机自启注册表管理。
 
 import logging
 import sys
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:  # pragma: nocover
@@ -87,6 +88,42 @@ class AutostartManager:
         except OSError as exc:
             logger.error("注册自启失败: %s", exc)
             return False
+
+    def is_valid(self) -> bool:
+        """检查已注册的自启项是否仍指向存在的可执行文件（G02）。
+
+        删掉 wallpace.exe / 换目录重装后，注册表里残留的旧路径
+        会让开机自启变成"坏启动项"（任务管理器里能看到、开机静默报错）。
+        本方法读出注册表值并校验其中引用的可执行文件是否存在；
+        无自启项或非 Windows 平台返回 False（视为无效，交由调用方决定是否清理）。
+
+        Returns:
+            自启项有效（路径存在）返回 True，否则 False。
+        """
+        if self._reg_key is None or self._winreg is None:
+            return False
+        try:
+            value = str(self._winreg.QueryValueEx(self._reg_key, _APP_NAME)[0])
+        except (FileNotFoundError, OSError):
+            return False
+        # 值形如 "C:\path\to\wallpace.exe" --hidden（见 enable() 的写入格式）。
+        # 取第一个空白分隔片段，并剥掉可能的外层引号。
+        path_part = value.strip().split()[0].strip('"') if value.strip() else ""
+        if not path_part:
+            return False
+        return Path(path_part).exists()
+
+    def cleanup_invalid(self) -> bool:
+        """移除指向不存在文件的坏自启项（G02 启动自愈）。
+
+        Returns:
+            确实移除了一项返回 True；本无自启项或项仍然有效时返回 False。
+        """
+        if not self.is_enabled:
+            return False
+        if self.is_valid():
+            return False
+        return self.disable()
 
     def disable(self) -> bool:
         """移除开机自启注册。返回是否成功。"""

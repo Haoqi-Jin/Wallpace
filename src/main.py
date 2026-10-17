@@ -8,6 +8,7 @@
 
 import contextlib
 import logging
+import logging.handlers
 import sys
 from pathlib import Path
 
@@ -34,7 +35,14 @@ logging.basicConfig(
     level=logging.DEBUG if "--debug" in sys.argv else logging.INFO,
     format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
     handlers=[
-        logging.FileHandler(LOG_DIR / "wallpace.log", encoding="utf-8"),
+        # G06：轮转日志。托盘常驻数月，FileHandler 只增不减会让 wallpace.log
+        # 无限膨胀；这里 1MB × 3 个备份封顶（约 4MB），旧日志按序号保留可查。
+        logging.handlers.RotatingFileHandler(
+            LOG_DIR / "wallpace.log",
+            maxBytes=1024 * 1024,
+            backupCount=3,
+            encoding="utf-8",
+        ),
         logging.StreamHandler(sys.stderr),
     ],
 )
@@ -93,6 +101,26 @@ def _resolve_interval_minutes(settings, switch_mode: str):
         except Exception:
             logger.exception("回写 interval_minutes 失败，仅本次启动生效")
     return interval_minutes
+
+
+def _cleanup_stale_autostart(mgr) -> bool:
+    """启动自愈（G02）：清理指向已不存在可执行文件的坏开机自启项。
+
+    删掉 wallpace.exe / 换目录重装后，HKCU 里残留的旧路径会变成坏启动项
+    （开机静默报错、任务管理器里可见）。有效项不动，避免误删。
+
+    Args:
+        mgr: AutostartManager 实例（或其替身）。
+
+    Returns:
+        确实清理了一项返回 True；无自启项或自启项仍有效时返回 False。
+    """
+    if not mgr.is_enabled:
+        return False
+    if not mgr.is_valid():
+        logger.warning("检测到开机自启项指向已不存在的可执行文件，自动清理")
+        return mgr.cleanup_invalid()
+    return False
 
 
 def start_scheduler(scheduler, on_switch) -> bool:
@@ -189,6 +217,8 @@ def main() -> None:
     from src.core.autostart_registry import AutostartManager
 
     mgr = AutostartManager()
+    # G02：启动自愈——坏自启项（指向已删除/exe 换位置的注册表残留）在此清理。
+    _cleanup_stale_autostart(mgr)
     # 兜底默认值必须是 False：与 DEFAULT_CONFIG 一致。若配置缺该键（老版本
     # 配置/手改配置），True 会悄悄恢复"首启静默写注册表"这个已被 G03 修掉的
     # 行为 —— 典型的"兜底值把修复吃掉"回归。

@@ -91,3 +91,50 @@ class TestStartScheduler:
         # 不得抛出：任何调度器异常都不应阻止主窗口显示
         start_scheduler(scheduler, lambda _p: None)
         scheduler.stop()
+
+
+class TestCleanupStaleAutostart:
+    """G02：坏开机自启项（指向已不存在的 exe）启动时自愈清理。"""
+
+    def test_stale_item_is_cleaned(self):
+        from src.main import _cleanup_stale_autostart
+
+        class StaleMgr:
+            is_enabled = True
+
+            def is_valid(self):
+                return False
+
+            def cleanup_invalid(self):
+                return True
+
+        assert _cleanup_stale_autostart(StaleMgr()) is True
+
+    def test_valid_item_is_left_alone(self):
+        from src.main import _cleanup_stale_autostart
+
+        class ValidMgr:
+            is_enabled = True
+            _cleaned = False
+
+            def is_valid(self):
+                return True
+
+            def cleanup_invalid(self):
+                self._cleaned = True
+                return True
+
+        mgr = ValidMgr()
+        assert _cleanup_stale_autostart(mgr) is False
+        assert mgr._cleaned is False
+
+    def test_no_autostart_registered_is_noop(self):
+        from src.main import _cleanup_stale_autostart
+
+        class NoItemMgr:
+            is_enabled = False
+
+            def is_valid(self):
+                raise AssertionError("is_valid 不应被调用")
+
+        assert _cleanup_stale_autostart(NoItemMgr()) is False

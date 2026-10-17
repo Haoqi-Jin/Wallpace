@@ -31,17 +31,17 @@
 
 | ID | 缺口（用户会遇到什么） | 证据 | 用户影响 | 优先级 | 成本 | 结论 |
 |---|---|---|---|---|---|---|
-| **G01** | **无单实例保护**：双击两次图标 → 两个托盘图标、两个调度器同时抢设壁纸 | 全仓无 `QLockFile`/单实例逻辑（grep 无命中）；`src/main.py:117-215` 直接 `QApplication` | 所有用户，误双击即发生；壁纸被两个进程轮流覆盖 | P0 | S | 本批做 |
-| **G02** | **卸载残留**：删掉 `wallpace.exe` 后，HKCU 自启项仍指向不存在的路径（任务管理器留下坏启动项），`~/.wallpace/`（config+日志）也不清理 | `src/core/autostart_registry.py:16-17,71-89` 写死注册；无卸载路径；实测 `~/.wallpace/config.json` 存在 | 卸载/换机用户；坏启动项 + 隐私数据残留 | P0 | M | 本批做 |
-| **G03** | **首次运行静默注册开机自启**：`auto_start` 默认 `True`，首启即写注册表，用户从没同意过 | `src/core/settings.py:28` `"auto_start": True`；`src/main.py:175-179` 启动即 `mgr.enable()` | 所有新用户；隐私冒犯 + 卸载残留（见 G02） | P0 | S | 本批做 |
-| **G04** | **配置损坏即静默重置、且不留备份**：config.json 一旦损坏（断电/磁盘错误），直接回退默认值，用户的目录/收藏/跳过**全部丢失**且只在日志里记一行 | `src/core/settings.py:109-114`：`except JSONDecodeError → dict(DEFAULT_CONFIG)`，不备份坏文件、不通知用户 | 断电/异常关机用户；**不可逆的数据丢失** | P0 | M | 本批做 |
-| **G05** | **无 LICENSE 文件，声明与实物不符**：`pyproject.toml` 和 README 都写 MIT，但仓库里没有 LICENSE；PySide6 是 **LGPLv3**（README 写成 "LGPL-2.1"） | `find` 无任何 LICENSE；`pyproject.toml:11` `license={text="MIT"}`；`README.md:153` | 公开分发时法律风险；个人自用可忽略 | P0 | S | 本批做 |
+| **G01** | **无单实例保护**：双击两次图标 → 两个托盘图标、两个调度器同时抢设壁纸 | 全仓无 `QLockFile`/单实例逻辑（grep 无命中）；`src/main.py:117-215` 直接 `QApplication` | 所有用户，误双击即发生；壁纸被两个进程轮流覆盖 | P0 | S | ✅ 已做（`src/core/single_instance.py` + main.py 启动时 `SingleInstanceGuard`，第二实例激活首实例后退出） |
+| **G02** | **卸载残留**：删掉 `wallpace.exe` 后，HKCU 自启项仍指向不存在的路径（任务管理器留下坏启动项），`~/.wallpace/`（config+日志）也不清理 | `src/core/autostart_registry.py:16-17,71-89` 写死注册；无卸载路径；实测 `~/.wallpace/config.json` 存在 | 卸载/换机用户；坏启动项 + 隐私数据残留 | P0 | M | ✅ 已做（G02 启动自愈 `is_valid`/`cleanup_invalid` + main.py 启动清理；设置页「卸载清理」入口移除自启项并删 `~/.wallpace`） |
+| **G03** | **首次运行静默注册开机自启**：`auto_start` 默认 `True`，首启即写注册表，用户从没同意过 | `src/core/settings.py:28` `"auto_start": True`；`src/main.py:175-179` 启动即 `mgr.enable()` | 所有新用户；隐私冒犯 + 卸载残留（见 G02） | P0 | S | ✅ 已做（默认改 `False`；main.py 缺键兜底值同步为 False；设置页复选框兜底值同步为 False） |
+| **G04** | **配置损坏即静默重置、且不留备份**：config.json 一旦损坏（断电/磁盘错误），直接回退默认值，用户的目录/收藏/跳过**全部丢失**且只在日志里记一行 | `src/core/settings.py:109-114`：`except JSONDecodeError → dict(DEFAULT_CONFIG)`，不备份坏文件、不通知用户 | 断电/异常关机用户；**不可逆的数据丢失** | P0 | M | ✅ 已做（损坏时备份为 `config.json.corrupt-*` 再重置，`load_warning` 经 `show_platform_warning` 弹给用户；测试 `test_corrupt_json_is_backed_up_and_reset` 覆盖） |
+| **G05** | **无 LICENSE 文件，声明与实物不符**：`pyproject.toml` 和 README 都写 MIT，但仓库里没有 LICENSE；PySide6 是 **LGPLv3**（README 写成 "LGPL-2.1"） | `find` 无任何 LICENSE；`pyproject.toml:11` `license={text="MIT"}`；`README.md:153` | 公开分发时法律风险；个人自用可忽略 | P0 | S | ✅ 已做（补 MIT `LICENSE` 文件；README 更正为 LGPLv3 + 指向 LICENSE） |
 
 ### P1 — 下批做（"好用、可诊断、可迁移、可信"）
 
 | ID | 缺口 | 证据 | 用户影响 | 优先级 | 成本 | 结论 |
 |---|---|---|---|---|---|---|
-| **G06** | **日志无轮转**：`wallpace.log` 只增不减，托盘常驻数月 → 无限增长 | `src/main.py:32` 仅 `FileHandler`，全仓无 `RotatingFileHandler`（grep 无命中） | 长期后台用户；磁盘占用、日志打开变慢 | P1 | S | 下批做（1 批） |
+| **G06** | **日志无轮转**：`wallpace.log` 只增不减，托盘常驻数月 → 无限增长 | `src/main.py:32` 仅 `FileHandler`，全仓无 `RotatingFileHandler`（grep 无命中） | 长期后台用户；磁盘占用、日志打开变慢 | P1 | S | ✅ 已做（`main.py` 改 `RotatingFileHandler`：1MB × 3 备份封顶，旧日志按序号保留） |
 | **G07** | **无"打开日志/诊断"入口**：用户不知日志在 `~/.wallpace/logs/`，出错只能干瞪眼 | 无 `QDesktopServices`/`openUrl`（grep 无命中）；`src/main.py:18` LOG_DIR 无 UI 暴露 | 出问题时无法自助上报/排查 | P1 | S | 下批做（1 批） |
 | **G13** | **版本号三处硬编码，UI 显示写死**：UI 版本恒显示 `v0.1.0`，改版本要改 3 个文件 | `src/app/window.py:300` `QLabel("v0.1.0")`；`src/__init__.py:3`；`pyproject.toml:7` | 发版漂移；用户看到的版本永远过期 | P1 | S | 下批做（1 批） |
 | **G14** | **README 与代码 ≥7 处不一致 + 目录树过时** | 见 §6 详表 | 误导用户/未来贡献者 | P1 | S | 下批做（1 批） |

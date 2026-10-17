@@ -17,7 +17,9 @@ MainWindow 只保留同名 facade 方法转发到本控制器。
 """
 
 import logging
+import shutil
 from collections.abc import Callable
+from pathlib import Path
 
 from PySide6.QtCore import QObject
 from PySide6.QtWidgets import QFileDialog, QMessageBox
@@ -99,6 +101,32 @@ class SettingsController(QObject):
     def on_minimize_toggled(self, checked: bool) -> None:
         """“关闭窗口时最小化到托盘”开关：仅保存设置。"""
         self._settings.set("minimize_to_tray", bool(checked))
+
+    def on_uninstall_cleanup(self) -> None:
+        """G02 卸载清理入口：移除开机自启项 + 删除 ~/.wallpace（配置/日志）。
+
+        不可逆操作：先二次确认；确认后按「先自启项、后数据目录」顺序执行。
+        数据目录删除失败不影响自启项移除结果（用户可手动删）。
+        """
+        reply = QMessageBox.question(
+            self._settings_page,
+            "卸载清理",
+            "将移除开机自启项，并删除 ~/.wallpace 下的配置/收藏/日志。\n"
+            "此操作不可撤销，确定继续吗？",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No,
+        )
+        if reply != QMessageBox.StandardButton.Yes:
+            return
+        if self._autostart_manager_factory is not None:
+            manager = self._autostart_manager_factory()
+            manager.disable()
+        data_dir = Path.home() / ".wallpace"
+        try:
+            shutil.rmtree(data_dir)
+            logger.info("已删除数据目录: %s", data_dir)
+        except OSError as exc:
+            logger.warning("删除数据目录失败（可手动删除）: %s", exc)
 
     # ----- 图片目录 -----
 

@@ -627,6 +627,7 @@ class MainWindow(QMainWindow):
             "on_remove_directory": self._remove_directory,
             "on_apply_interval": self._apply_interval,
             "on_remove_single_dir": self._remove_single_dir,
+            "on_uninstall_cleanup": self._on_uninstall_cleanup,
             "on_wallpaper_mode_toggle": self._on_wallpaper_mode_toggled,
         }
         page = SettingsPage(settings=self._settings, callbacks=callbacks)
@@ -641,6 +642,10 @@ class MainWindow(QMainWindow):
     def _on_autostart_toggled(self, checked: bool) -> None:
         """“开机自启”开关（委托 SettingsController）。"""
         self._settings_ctrl.on_autostart_toggled(checked)
+
+    def _on_uninstall_cleanup(self) -> None:
+        """“卸载清理”（委托 SettingsController，带二次确认）。"""
+        self._settings_ctrl.on_uninstall_cleanup()
 
     def _on_minimize_toggled(self, checked: bool) -> None:
         """“关闭窗口时最小化到托盘”开关（委托 SettingsController）。"""

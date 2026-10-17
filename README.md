@@ -87,7 +87,7 @@ wallpace/
 | 11 | 系统托盘后台运行 + 右键菜单 | ✅ 完成 |
 | 12 | 开机自启动 (HKCU 注册表) | ✅ 完成 |
 | 13 | 图片库缩略图预览 + 点击设壁纸 | ✅ 完成 |
-| 14 | 文件夹变更监听 (watchdog) | 📋 待开发 |
+| 14 | 文件夹变更监听 (watchdog) | ✅ 完成 |
 
 ---
 
@@ -150,4 +150,4 @@ build.bat
 - **样式语言：** QSS（Qt Style Sheets），粉蓝渐变主题
 - **配置格式：** JSON (.wallpace.json)
 - **构建工具：** PyInstaller
-- **许可协议：** LGPL-2.1 (PySide6) + MIT (本项目代码)
+- **许可协议：** LGPLv3 (PySide6) + MIT (本项目代码，见仓库根 LICENSE)

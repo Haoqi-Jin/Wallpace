@@ -1,6 +1,7 @@
 """tests/test_autostart_registry.py — 开机自启注册表管理测试。"""
 
 import logging
+from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -118,3 +119,44 @@ class TestAutostartManagerMockWinreg:
             result = mgr.disable()
             assert result is True
             fake_winreg.DeleteValue.assert_called_once()
+
+
+class TestAutostartRegistryG02:
+    """G02：启动时校验自启项指向的 exe 是否仍存在，坏项可被清理。"""
+
+    def _make(self, query_return):
+        """按给定的注册表值构造 manager；值格式与 enable() 写入一致。"""
+        fake_winreg = MagicMock()
+        fake_key = MagicMock()
+        fake_winreg.HKEY_CURRENT_USER = MagicMock()
+        fake_winreg.OpenKey.return_value = fake_key
+        fake_winreg.REG_SZ = 1
+        fake_winreg.QueryValueEx.return_value = query_return
+        fake_winreg.DeleteValue.return_value = None
+
+        with patch.dict("sys.modules", {"winreg": fake_winreg}, create=True):
+            from src.core.autostart_registry import AutostartManager
+
+            return AutostartManager()
+
+    def test_is_valid_true_when_exe_exists(self, tmp_path: Path) -> None:
+        exe = tmp_path / "wallpace.exe"
+        exe.write_bytes(b"MZ")
+        mgr = self._make((f'"{exe}" --hidden', None))
+        assert mgr.is_enabled is True
+        assert mgr.is_valid() is True
+        assert mgr.cleanup_invalid() is False  # 有效项不动
+
+    def test_is_valid_false_when_exe_missing(self, tmp_path: Path) -> None:
+        gone = tmp_path / "nope" / "wallpace.exe"
+        mgr = self._make((f'"{gone}" --hidden', None))
+        assert mgr.is_valid() is False
+        assert mgr.cleanup_invalid() is True
+        # 清理后注册表值应被删除
+        mgr._winreg.DeleteValue.assert_called_once()
+
+    def test_cleanup_invalid_with_empty_value_is_cleaned(self, tmp_path: Path) -> None:
+        mgr = self._make(("", None))
+        assert mgr.is_enabled is True  # 空串仍是"有值"（QueryValueEx 成功）
+        assert mgr.is_valid() is False
+        assert mgr.cleanup_invalid() is True

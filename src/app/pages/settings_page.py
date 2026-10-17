@@ -201,10 +201,24 @@ class SettingsPage(QWidget):
         # 开机自启
         self._autostart_check = QCheckBox("开机自启")
         self._autostart_check.setChecked(
-            bool(self._settings.get("auto_start", True))
+            # 兜底默认值必须是 False：与 DEFAULT_CONFIG 一致（G03）。
+            # 老版本配置缺键时若用 True 兜底，复选框会误显示"已勾选"。
+            bool(self._settings.get("auto_start", False))
         )
         self._autostart_check.toggled.connect(self._cb["on_autostart_toggle"])
         general_layout.addWidget(self._autostart_check)
+
+        # G02：卸载清理入口。勾选会移除开机自启项与 ~/.wallpace 配置/日志，
+        # 属不可逆动作，故用按钮显式触发（并二次确认），而非静默/勾选式。
+        self._uninstall_cleanup_btn = QPushButton("卸载清理")
+        self._uninstall_cleanup_btn.setToolTip(
+            "移除开机自启项，并删除 ~/.wallpace 下的配置/收藏/日志。"
+            "此操作不可撤销。"
+        )
+        self._uninstall_cleanup_btn.clicked.connect(
+            self._cb["on_uninstall_cleanup"]
+        )
+        general_layout.addWidget(self._uninstall_cleanup_btn)
 
         # 关闭窗口时最小化到托盘
         self._minimize_check = QCheckBox("关闭窗口时最小化到托盘")
