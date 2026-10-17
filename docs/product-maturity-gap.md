@@ -42,7 +42,7 @@
 | ID | 缺口 | 证据 | 用户影响 | 优先级 | 成本 | 结论 |
 |---|---|---|---|---|---|---|
 | **G06** | **日志无轮转**：`wallpace.log` 只增不减，托盘常驻数月 → 无限增长 | `src/main.py:32` 仅 `FileHandler`，全仓无 `RotatingFileHandler`（grep 无命中） | 长期后台用户；磁盘占用、日志打开变慢 | P1 | S | ✅ 已做（`main.py` 改 `RotatingFileHandler`：1MB × 3 备份封顶，旧日志按序号保留） |
-| **G07** | **无"打开日志/诊断"入口**：用户不知日志在 `~/.wallpace/logs/`，出错只能干瞪眼 | 无 `QDesktopServices`/`openUrl`（grep 无命中）；`src/main.py:18` LOG_DIR 无 UI 暴露 | 出问题时无法自助上报/排查 | P1 | S | 下批做（1 批） |
+| **G07** | **无"打开日志/诊断"入口**：用户不知日志在 `~/.wallpace/logs/`，出错只能干瞪眼 | 无 `QDesktopServices`/`openUrl`（grep 无命中）；`src/main.py:18` LOG_DIR 无 UI 暴露 | 出问题时无法自助上报/排查 | P1 | S | ✅ 已做（新增 `src/core/diagnostics.py` 单一真源；设置页「打开日志目录（诊断）」按钮 + 托盘菜单项，打开失败弹提示而非静默） |
 | **G13** | **版本号三处硬编码，UI 显示写死**：UI 版本恒显示 `v0.1.0`，改版本要改 3 个文件 | `src/app/window.py:300` `QLabel("v0.1.0")`；`src/__init__.py:3`；`pyproject.toml:7` | 发版漂移；用户看到的版本永远过期 | P1 | S | 下批做（1 批） |
 | **G14** | **README 与代码 ≥7 处不一致 + 目录树过时** | 见 §6 详表 | 误导用户/未来贡献者 | P1 | S | 下批做（1 批） |
 | **G10** | **`per_monitor_map` 是死配置**：只写不读，重启后不恢复逐屏壁纸，失效的显示器 ID 永不清 | `src/app/window.py:719` 唯一写入点；`src/core/settings.py:33,308` 仅校验；全仓无读取应用 | 多屏用户；重启后逐屏设置"消失"，配置无谓膨胀 | P1 | S | 下批做（1 批） |

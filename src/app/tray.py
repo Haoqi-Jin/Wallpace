@@ -52,6 +52,12 @@ class TrayIcon(QSystemTrayIcon):
         self._act_show.triggered.connect(self._on_show_window)
         self._menu.addAction(self._act_show)
 
+        # G07：诊断入口。窗口最小化到托盘后，用户最常在这里找"出了事怎么办"，
+        # 所以菜单同样暴露日志目录（委托 MainWindow → SettingsController）。
+        self._act_logs = QAction("打开日志目录", self._menu)
+        self._act_logs.triggered.connect(self._on_open_logs)
+        self._menu.addAction(self._act_logs)
+
         self._menu.addSeparator()
 
         # 退出
@@ -87,6 +93,9 @@ class TrayIcon(QSystemTrayIcon):
         self._main_window.show()
         self._main_window.raise_()
         self._main_window.activateWindow()
+
+    def _on_open_logs(self) -> None:
+        self._main_window._on_open_logs()
 
     def _on_exit(self) -> None:
         logger.info("\u4ece\u6258\u76d8\u9000\u51fa")

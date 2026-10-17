@@ -128,6 +128,21 @@ class SettingsController(QObject):
         except OSError as exc:
             logger.warning("删除数据目录失败（可手动删除）: %s", exc)
 
+    def on_open_logs(self) -> None:
+        """G07 诊断入口：在文件管理器中打开日志目录。
+
+        打开失败时弹提示（而非静默失败）——入口存在的意义就是让用户
+        在出问题时能自助定位日志，打不开就必须告知。
+        """
+        from src.core import diagnostics
+
+        if not diagnostics.open_logs_directory():
+            QMessageBox.critical(
+                self._settings_page,
+                "无法打开日志目录",
+                f"请在文件管理器中手动打开：\n{diagnostics.LOGS_DIR}",
+            )
+
     # ----- 图片目录 -----
 
     def add_directory(self) -> None:

@@ -220,6 +220,16 @@ class SettingsPage(QWidget):
         )
         general_layout.addWidget(self._uninstall_cleanup_btn)
 
+        # G07：诊断入口。用户出问题时能自己找到日志（~/.wallpace/logs/），
+        # 不再需要读文档/翻注册表猜位置。
+        self._open_logs_btn = QPushButton("打开日志目录（诊断）")
+        self._open_logs_btn.setToolTip(
+            "在文件管理器中打开 ~/.wallpace/logs，"
+            "报错时可把 wallpace.log 发给维护者排查。"
+        )
+        self._open_logs_btn.clicked.connect(self._cb["on_open_logs"])
+        general_layout.addWidget(self._open_logs_btn)
+
         # 关闭窗口时最小化到托盘
         self._minimize_check = QCheckBox("关闭窗口时最小化到托盘")
         self._minimize_check.setChecked(

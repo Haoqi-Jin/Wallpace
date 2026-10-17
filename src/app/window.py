@@ -628,6 +628,7 @@ class MainWindow(QMainWindow):
             "on_apply_interval": self._apply_interval,
             "on_remove_single_dir": self._remove_single_dir,
             "on_uninstall_cleanup": self._on_uninstall_cleanup,
+            "on_open_logs": self._on_open_logs,
             "on_wallpaper_mode_toggle": self._on_wallpaper_mode_toggled,
         }
         page = SettingsPage(settings=self._settings, callbacks=callbacks)
@@ -646,6 +647,14 @@ class MainWindow(QMainWindow):
     def _on_uninstall_cleanup(self) -> None:
         """“卸载清理”（委托 SettingsController，带二次确认）。"""
         self._settings_ctrl.on_uninstall_cleanup()
+
+    def _on_open_logs(self) -> None:
+        """“打开日志目录”（委托 SettingsController，G07 诊断入口）。"""
+        self._settings_ctrl.on_open_logs()
+
+    def open_logs_directory(self) -> None:
+        """G07 公共入口：托盘菜单「打开日志目录」经此委托 SettingsController。"""
+        self._on_open_logs()
 
     def _on_minimize_toggled(self, checked: bool) -> None:
         """“关闭窗口时最小化到托盘”开关（委托 SettingsController）。"""

@@ -16,8 +16,12 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
-# 日志配置 — 使用用户 home 目录避免权限问题
-LOG_DIR = Path.home() / ".wallpace" / "logs"
+# 日志配置 — 使用用户 home 目录避免权限问题。
+# G07：路径收敛到 diagnostics.LOGS_DIR（单一真源），UI 的「打开日志目录」
+# 诊断入口与这里写文件的是同一个路径，不会出现"入口打开的目录≠日志所在"。
+from src.core.diagnostics import LOGS_DIR
+
+LOG_DIR = LOGS_DIR
 LOG_DIR.mkdir(parents=True, exist_ok=True)
 
 # 卡死时自动把主线程堆栈 dump 到日志，便于排查 UI 无响应类问题
