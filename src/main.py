@@ -195,6 +195,10 @@ def main() -> None:
     )
     wm = WallpaperManager()
 
+    # G09：启动时应用已保存的壁纸填充方式（注册表本身持久，但用户在
+    # 系统「个性化」里手动改过时，这里以 Wallpace 配置为准同步一次）
+    wm.apply_wallpaper_style(str(settings.get("wallpaper_style", "fill")))
+
     logger = logging.getLogger("main")
 
     # 验证壁纸管理器是否可用

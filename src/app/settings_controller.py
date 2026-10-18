@@ -272,6 +272,109 @@ class SettingsController(QObject):
         self._settings_page.update_mode_description(internal_mode)
         self._settings_page.refresh()
 
+    def on_wallpaper_style_changed(self, text: str) -> None:
+        """G09：壁纸填充方式变更：保存设置并立即应用到系统。
+
+        Args:
+            text: 下拉框显示的中文文案（如 "填满"）。
+        """
+        from src.app.pages.settings_page import WALLPAPER_STYLE_REVERSE_MAP
+        style_key = WALLPAPER_STYLE_REVERSE_MAP.get(text, "fill")
+        self._settings.set("wallpaper_style", style_key)
+        self._wallpaper_manager.apply_wallpaper_style(style_key)
+
+    def on_restore_defaults(self) -> None:
+        """G11：恢复默认配置（不删文件，只重置配置值）。"""
+        reply = QMessageBox.question(
+            self._settings_page,
+            "恢复默认配置",
+            "将把所有设置恢复为出厂默认值（目录 / 收藏 / 跳过列表等清空）。\n"
+            "此操作不会删除磁盘上的图片文件，确定继续吗？",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No,
+        )
+        if reply != QMessageBox.StandardButton.Yes:
+            return
+        self._settings.reset_to_defaults()
+        self._library._all_images = []
+        self._library._skip_set = set()
+        self._library._favorite_set = set()
+        self._library._directories = []
+        self._library._last_scan_signature = None
+        self._refresh_gallery()
+        self._settings_page.refresh()
+        logger.info("配置已恢复为默认值")
+
+    def on_export_config(self) -> None:
+        """G11：导出配置 + 图库状态为 JSON 文件。"""
+        import json as _json
+
+        default_dir = str(Path.home() / "wallpace_export")
+        file_path, _ = QFileDialog.getSaveFileName(
+            self._settings_page,
+            "导出配置",
+            default_dir + ".json",
+            "JSON 文件 (*.json)",
+        )
+        if not file_path:
+            return
+        data = {
+            "version": 1,
+            "config": self._settings._data,
+            "image_library": self._library.to_dict(),
+        }
+        try:
+            Path(file_path).write_text(
+                _json.dumps(data, indent=2, ensure_ascii=False),
+                encoding="utf-8",
+            )
+            logger.info("配置已导出至: %s", file_path)
+        except OSError as exc:
+            QMessageBox.critical(
+                self._settings_page, "导出失败", f"无法写入文件：\n{exc}"
+            )
+
+    def on_import_config(self) -> None:
+        """G11：从 JSON 文件导入配置 + 图库状态。"""
+        import json as _json
+        from pathlib import Path
+
+        file_path, _ = QFileDialog.getOpenFileName(
+            self._settings_page,
+            "导入配置",
+            str(Path.home()),
+            "JSON 文件 (*.json)",
+        )
+        if not file_path:
+            return
+        try:
+            raw = _json.loads(Path(file_path).read_text(encoding="utf-8"))
+            config = raw.get("config", {})
+            lib_data = raw.get("image_library", {})
+
+            if config:
+                for key, val in config.items():
+                    self._settings.set(key, val, defer=True)
+                self._settings.save()
+
+            if lib_data:
+                self._library._directories = list(lib_data.get("directories", []))
+                self._library._skip_set = set(lib_data.get("skip_list", []))
+                self._library._favorite_set = set(lib_data.get("favorites", []))
+                self._library._last_scan_signature = None
+
+            self._refresh_gallery()
+            self._settings_page.refresh()
+            self._refresh_status()
+            self._set_watcher_directories(
+                self._settings.get("image_directories", [])
+            )
+            logger.info("配置已导入自: %s", file_path)
+        except (OSError, _json.JSONDecodeError, KeyError) as exc:
+            QMessageBox.critical(
+                self._settings_page, "导入失败", f"无法解析文件：\n{exc}"
+            )
+
     def apply_interval(self) -> None:
         """应用间隔时间设置。"""
         try:

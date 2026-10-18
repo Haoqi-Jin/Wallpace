@@ -2,7 +2,7 @@
 
 import sys
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -185,3 +185,82 @@ class TestWallpaperManagerPerMonitor:
             ok = wm.set_wallpapers({"M1": str(a)})
         assert ok is False
         assert spi.called
+
+
+class TestWallpaperStyleG09:
+    """G09：壁纸填充方式 → 注册表 WallpaperStyle + SPI 广播。
+
+    注：注册表写入 mock 掉（winreg 在模块内是函数内导入，直接 patch
+    顶层模块），避免测试真实改用户注册表。
+    """
+
+    @pytest.fixture()
+    def wm(self):
+        return WallpaperManager()
+
+    def _fake_key(self):
+        """可用作 with 语句的假注册表 key。"""
+        fake_key = MagicMock()
+        fake_key.__enter__ = MagicMock(return_value=fake_key)
+        fake_key.__exit__ = MagicMock(return_value=False)
+        return fake_key
+
+    def test_apply_style_writes_registry_and_broadcasts(self, wm):
+        """fill=10：SetValueEx(WallpaperStyle, DWORD=10) + SPI 广播。"""
+        fake_key = self._fake_key()
+        with (
+            patch("winreg.OpenKey", return_value=fake_key) as mock_open,
+            patch("winreg.SetValueEx") as mock_set,
+            patch("winreg.REG_DWORD", 4),
+            patch("ctypes.windll.user32.SystemParametersInfoW", return_value=1) as spi,
+        ):
+            ok = wm.apply_wallpaper_style("fill")
+        assert ok is True
+        mock_set.assert_called_once_with(fake_key, "WallpaperStyle", 0, 4, 10)
+        assert spi.called  # 通知资源管理器刷新
+
+    def test_apply_style_fit_writes_six(self, wm):
+        """fit=6：完整显示留黑边。"""
+        fake_key = self._fake_key()
+        with (
+            patch("winreg.OpenKey", return_value=fake_key),
+            patch("winreg.SetValueEx") as mock_set,
+            patch("winreg.REG_DWORD", 4),
+            patch("ctypes.windll.user32.SystemParametersInfoW", return_value=1),
+        ):
+            ok = wm.apply_wallpaper_style("fit")
+        assert ok is True
+        assert mock_set.call_args[0][4] == 6
+
+    def test_apply_style_invalid_returns_false_noop(self, wm):
+        """未知样式：直接 False，不碰注册表、不广播。"""
+        with (
+            patch("winreg.OpenKey") as mock_open,
+            patch("ctypes.windll.user32.SystemParametersInfoW") as spi,
+        ):
+            ok = wm.apply_wallpaper_style("invalid")
+        assert ok is False
+        mock_open.assert_not_called()
+        spi.assert_not_called()
+
+    def test_registry_failure_returns_false(self, wm):
+        """OpenKey 抛 OSError（权限/键缺失）→ 吞掉并返回 False。"""
+        import winreg as _winreg
+        fake_key = self._fake_key()
+        with (
+            patch("winreg.OpenKey", side_effect=OSError("no key")),
+            patch("ctypes.windll.user32.SystemParametersInfoW") as spi,
+        ):
+            ok = wm.apply_wallpaper_style("fill")
+        assert ok is False
+        spi.assert_not_called()
+
+    def test_style_map_covers_all_five(self):
+        assert set(WallpaperManager.STYLE_REGISTRY_VALUES) == {
+            "tile", "center", "stretch", "fit", "fill"
+        }
+        assert WallpaperManager.STYLE_REGISTRY_VALUES["tile"] == 0
+        assert WallpaperManager.STYLE_REGISTRY_VALUES["center"] == 1
+        assert WallpaperManager.STYLE_REGISTRY_VALUES["stretch"] == 2
+        assert WallpaperManager.STYLE_REGISTRY_VALUES["fit"] == 6
+        assert WallpaperManager.STYLE_REGISTRY_VALUES["fill"] == 10

@@ -36,9 +36,14 @@ DEFAULT_CONFIG = {
     # 逐屏壁纸（#7）：unified=所有显示器统一一张；per_monitor=每屏一张
     "wallpaper_mode": "unified",
     "per_monitor_map": {},
+    # G09：壁纸填充方式。fill（填满，可能裁切）/ fit（完整显示，留黑边）/
+    # stretch / tile / center。默认与 Windows 10/11 系统默认一致。
+    "wallpaper_style": "fill",
 }
 
 VALID_SWITCH_MODES = ("daily_random", "interval_minutes", "manual")
+# G09：壁纸填充方式（与 WallpaperManager.STYLE_REGISTRY_VALUES 对应）
+VALID_WALLPAPER_STYLES = ("tile", "center", "stretch", "fit", "fill")
 
 # 配置存储根目录（统一到用户目录，避免打包/开机自启时 CWD 变化导致读写不同配置）
 APP_DIR = Path.home() / ".wallpace"
@@ -315,6 +320,10 @@ class Settings:
             errors.append("'wallpaper_mode' 必须为 unified 或 per_monitor")
         if not isinstance(data.get("per_monitor_map", {}), dict):
             errors.append("'per_monitor_map' 必须是字典")
+
+        # --- G09: 壁纸填充方式 ---
+        if data.get("wallpaper_style", "fill") not in VALID_WALLPAPER_STYLES:
+            errors.append(f"'wallpaper_style' 必须为 {', '.join(VALID_WALLPAPER_STYLES)} 之一")
 
         return errors
 

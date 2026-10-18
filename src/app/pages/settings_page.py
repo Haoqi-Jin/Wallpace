@@ -36,6 +36,16 @@ MODE_DESCRIPTIONS = {
     "manual": "只响应手动切换操作，无自动切换",
 }
 
+# G09：壁纸填充方式 内部值 ↔ 显示文案
+WALLPAPER_STYLE_DISPLAY_MAP = {
+    "fill": "填满",
+    "fit": "完整显示（留黑边）",
+    "stretch": "拉伸",
+    "center": "居中",
+    "tile": "平铺",
+}
+WALLPAPER_STYLE_REVERSE_MAP = {v: k for k, v in WALLPAPER_STYLE_DISPLAY_MAP.items()}
+
 
 class SettingsPage(QWidget):
     """设置页面：图片文件夹、切换模式、通用开关。
@@ -185,6 +195,24 @@ class SettingsPage(QWidget):
         self._interval_group.setVisible(False)
         switch_layout.addWidget(self._interval_group)
 
+        # G09：壁纸填充方式。与 Windows「个性化 → 背景」同款 5 选项，
+        # 切换后立即生效（写注册表 + 广播），用户不再被黑边/裁切绑死。
+        style_label = QLabel("壁纸填充方式:")
+        style_label.setStyleSheet("font-size: 12px; margin-top: 8px;")
+        self._style_combo = QComboBox()
+        self._style_combo.addItems(["填满", "完整显示（留黑边）", "拉伸", "居中", "平铺"])
+        self._style_combo.setCurrentText(
+            WALLPAPER_STYLE_DISPLAY_MAP.get(
+                self._settings.get("wallpaper_style", "fill"), "填满"
+            )
+        )
+        self._style_combo.currentTextChanged.connect(self._cb["on_wallpaper_style_changed"])
+        style_row = QHBoxLayout()
+        style_row.addWidget(style_label)
+        style_row.addWidget(self._style_combo)
+        style_row.addStretch(1)
+        switch_layout.addLayout(style_row)
+
         layout.addWidget(group_switch)
         layout.addSpacing(16)
 
@@ -229,6 +257,26 @@ class SettingsPage(QWidget):
         )
         self._open_logs_btn.clicked.connect(self._cb["on_open_logs"])
         general_layout.addWidget(self._open_logs_btn)
+
+        # G11：配置备份/迁移入口。换机或误清设置时可导出/导入 JSON。
+        self._export_cfg_btn = QPushButton("导出配置")
+        self._export_cfg_btn.setToolTip(
+            "把当前配置与图库状态（目录 / 收藏 / 跳过）导出为 JSON 文件。"
+        )
+        self._export_cfg_btn.clicked.connect(self._cb["on_export_config"])
+        general_layout.addWidget(self._export_cfg_btn)
+
+        self._import_cfg_btn = QPushButton("导入配置")
+        self._import_cfg_btn.setToolTip("从 JSON 文件恢复配置与图库状态（G11）。")
+        self._import_cfg_btn.clicked.connect(self._cb["on_import_config"])
+        general_layout.addWidget(self._import_cfg_btn)
+
+        self._restore_defaults_btn = QPushButton("恢复默认配置")
+        self._restore_defaults_btn.setToolTip(
+            "把所有设置恢复为出厂默认值（目录 / 收藏 / 跳过清空）；不删磁盘上的图片。"
+        )
+        self._restore_defaults_btn.clicked.connect(self._cb["on_restore_defaults"])
+        general_layout.addWidget(self._restore_defaults_btn)
 
         # 关闭窗口时最小化到托盘
         self._minimize_check = QCheckBox("关闭窗口时最小化到托盘")

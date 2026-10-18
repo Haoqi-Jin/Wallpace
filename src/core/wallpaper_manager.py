@@ -177,6 +177,58 @@ class WallpaperManager:
             logger.warning("无法读取当前壁纸路径")
             return None
 
+    # G09：壁纸填充方式 → 注册表 WallpaperStyle 值
+    # （Windows 系统设置"个性化 → 背景"同款枚举）
+    STYLE_REGISTRY_VALUES = {
+        "tile": 0,
+        "center": 1,
+        "stretch": 2,
+        "fit": 6,
+        "fill": 10,
+    }
+
+    def apply_wallpaper_style(self, style: str) -> bool:
+        """G09：把壁纸填充方式写入注册表并通知系统刷新。
+
+        写 ``HKCU\\Control Panel\\Desktop\\WallpaperStyle``（DWORD），随后调
+        SPI 广播让资源管理器应用。非 Windows / 未知样式安全返回 False。
+
+        Args:
+            style: tile / center / stretch / fit / fill。
+
+        Returns:
+            写成功返回 True；非 Windows / 未知样式 / 注册表失败返回 False。
+        """
+        value = self.STYLE_REGISTRY_VALUES.get(style)
+        if value is None:
+            logger.warning("未知壁纸填充方式: %r，忽略", style)
+            return False
+        if not self._is_windows:
+            logger.warning("非 Windows 平台，无法设置壁纸填充方式")
+            return False
+        try:
+            import winreg
+        except ImportError:
+            logger.warning("winreg 不可用，无法设置壁纸填充方式")
+            return False
+        try:
+            with winreg.OpenKey(
+                winreg.HKEY_CURRENT_USER,
+                r"Control Panel\Desktop",
+                0,
+                winreg.KEY_SET_VALUE,
+            ) as key:
+                winreg.SetValueEx(key, "WallpaperStyle", 0, winreg.REG_DWORD, value)
+            # 通知资源管理器应用新样式（与 set_wallpaper 同款广播）
+            ctypes.windll.user32.SystemParametersInfoW(
+                SPI_SETDESKWALLPAPER, 0, None, SPIF_UPDATEINIFILE | SPIF_SENDWININICHANGE
+            )
+            logger.info("壁纸填充方式已设置为: %s", style)
+            return True
+        except OSError as exc:
+            logger.error("写入壁纸填充方式失败: %s", exc)
+            return False
+
     def verify_set(self, image_path: str) -> bool:
         """先尝试设置，然后验证是否生效。
 

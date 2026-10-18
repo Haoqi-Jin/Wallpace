@@ -648,6 +648,10 @@ class MainWindow(QMainWindow):
             "on_uninstall_cleanup": self._on_uninstall_cleanup,
             "on_open_logs": self._on_open_logs,
             "on_wallpaper_mode_toggle": self._on_wallpaper_mode_toggled,
+            "on_wallpaper_style_changed": self._on_wallpaper_style_changed,
+            "on_export_config": self._on_export_config,
+            "on_import_config": self._on_import_config,
+            "on_restore_defaults": self._on_restore_defaults,
         }
         page = SettingsPage(settings=self._settings, callbacks=callbacks)
         self._settings_page = page
@@ -669,6 +673,22 @@ class MainWindow(QMainWindow):
     def _on_open_logs(self) -> None:
         """“打开日志目录”（委托 SettingsController，G07 诊断入口）。"""
         self._settings_ctrl.on_open_logs()
+
+    def _on_wallpaper_style_changed(self, text: str) -> None:
+        """G09：壁纸填充方式变更（委托 SettingsController，立即生效）。"""
+        self._settings_ctrl.on_wallpaper_style_changed(text)
+
+    def _on_export_config(self) -> None:
+        """G11：导出配置 + 图库状态（委托 SettingsController）。"""
+        self._settings_ctrl.on_export_config()
+
+    def _on_import_config(self) -> None:
+        """G11：导入配置 + 图库状态（委托 SettingsController）。"""
+        self._settings_ctrl.on_import_config()
+
+    def _on_restore_defaults(self) -> None:
+        """G11：恢复默认配置（委托 SettingsController，带二次确认）。"""
+        self._settings_ctrl.on_restore_defaults()
 
     def open_logs_directory(self) -> None:
         """G07 公共入口：托盘菜单「打开日志目录」经此委托 SettingsController。"""
