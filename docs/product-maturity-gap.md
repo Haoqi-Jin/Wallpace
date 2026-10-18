@@ -44,7 +44,7 @@
 | **G06** | **日志无轮转**：`wallpace.log` 只增不减，托盘常驻数月 → 无限增长 | `src/main.py:32` 仅 `FileHandler`，全仓无 `RotatingFileHandler`（grep 无命中） | 长期后台用户；磁盘占用、日志打开变慢 | P1 | S | ✅ 已做（`main.py` 改 `RotatingFileHandler`：1MB × 3 备份封顶，旧日志按序号保留） |
 | **G07** | **无"打开日志/诊断"入口**：用户不知日志在 `~/.wallpace/logs/`，出错只能干瞪眼 | 无 `QDesktopServices`/`openUrl`（grep 无命中）；`src/main.py:18` LOG_DIR 无 UI 暴露 | 出问题时无法自助上报/排查 | P1 | S | ✅ 已做（新增 `src/core/diagnostics.py` 单一真源；设置页「打开日志目录（诊断）」按钮 + 托盘菜单项，打开失败弹提示而非静默） |
 | **G13** | **版本号三处硬编码，UI 显示写死**：UI 版本恒显示 `v0.1.0`，改版本要改 3 个文件 | `src/app/window.py:300` `QLabel("v0.1.0")`；`src/__init__.py:3`；`pyproject.toml:7` | 发版漂移；用户看到的版本永远过期 | P1 | S | ✅ 已做（CHANGELOG 0.2.0 记了"版本号改为单一真源 `src/__init__.py::__version__`，UI 与打包元数据均派生"，源码已无硬编码） |
-| **G14** | **README 与代码 ≥7 处不一致 + 目录树过时** | 见 §6 详表 | 误导用户/未来贡献者 | P1 | S | 下批做（1 批） |
+| **G14** | **README 与代码 ≥7 处不一致 + 目录树过时** | 见 §6 详表 | 误导用户/未来贡献者 | P1 | S | ✅ 已做（2415122 重写 README 目录树补全全部模块、配置路径更正为 `~/.wallpace/config.json`、功能表扩至 20 项；§6 各条已随 G05/G13 等修复逐条消除） |
 | **G10** | **`per_monitor_map` 是死配置**：只写不读，重启后不恢复逐屏壁纸，失效的显示器 ID 永不清 | `src/app/window.py:719` 唯一写入点；`src/core/settings.py:33,308` 仅校验；全仓无读取应用 | 多屏用户；重启后逐屏设置"消失"，配置无谓膨胀 | P1 | S | ✅ 已做（`window.py:_restore_per_monitor_wallpapers()` 启动时读取 + 有效性过滤（monitor id 不存在/图片缺失→丢弃）+ 写回清理后的 map；5 个测试覆盖匹配/未知 monitor/图片缺失/全无效/非逐屏分支） |
 | **G23** | **图片库页面无空状态提示**：没有图片时网格纯白，用户以为坏了 | `src/app/pages/gallery_page.py:167-206` 无空态分支（仅预览页有引导 `window.py:340-357`） | 新用户；困惑"是不是没扫到" | P1 | S | ✅ 已做（`gallery_page.py` 新增 `_empty_hint` QLabel + `_update_empty_hint()` 方法，筛选后无图片时显示对应引导文案；测试覆盖 5 用例） |
 | **G08** | **切换失败无兜底、无反馈**：随机选到刚被删/损坏的图时静默失败（"点了没反应"） | `src/core/scheduler.py:394-408` 仅成功才回调；`src/core/wallpaper_manager.py:56-58` 失败只写日志 | 偶发但高频；用户以为程序卡了 | P1 | M | 下批做（2 批） |
