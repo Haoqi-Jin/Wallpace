@@ -22,6 +22,7 @@
 
 ### 文档
 
+- G15 新增面向普通用户的文档：`docs/user-guide.md`（安装/首用/切换方式/填充方式/多屏/备份迁移/自启/卸载全流程）+ `docs/troubleshooting.md`（FAQ、如何看日志、「切换失败」气泡解释、配置损坏找回）；README 目录树与「使用说明」段均加链接。
 - G14 README 全面对齐代码：目录树补全、配置路径更正为 `~/.wallpace/config.json`、功能表扩至 20 项。
 - G13 版本号单一真源已于 0.2.0 完成，状态同步。
 - `docs/product-maturity-gap.md` 各缺口状态随实现逐条更新。

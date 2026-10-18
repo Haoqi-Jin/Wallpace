@@ -15,6 +15,8 @@
 wallpace/
 ├── README.md                    ← 本文件（项目总纲）
 ├── docs/                        ← 项目开发文档集
+│   ├── user-guide.md            ← 使用指南（面向普通用户）
+│   ├── troubleshooting.md       ← 故障排查手册（FAQ / 日志 / 配置损坏）
 │   ├── architecture.md          ← 架构设计文档
 │   ├── api-design.md            ← API 设计文档
 │   ├── dev-standards.md         ← 开发执行标准
@@ -154,6 +156,9 @@ build.bat
 - **托盘右键 → 打开日志目录** — 弹出诊断日志文件夹
 - **侧边栏底部** — 切换 / 跳过 / 收藏 三个圆形按钮
 - **设置页面** — 查看当前配置的图片和切换模式；支持「卸载清理」
+
+> 完整使用指南见 [`docs/user-guide.md`](docs/user-guide.md)；出问题先看
+> [`docs/troubleshooting.md`](docs/troubleshooting.md)。
 
 ---
 
