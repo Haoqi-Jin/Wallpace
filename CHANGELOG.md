@@ -22,7 +22,7 @@
 
 ### 变更
 
-- G12 打包改 onedir + 去 UPX：`packaging/wallpace.spec` 加 `COLLECT`、`upx=False`，产物由单文件 `dist/wallpace.exe`（~48MB，每次解压到 temp）变为 `dist/wallpace/` 目录（启动快、杀软误报低）；分发按拍板为绿色版 zip，**不做代码签名与 Inno Setup 安装包**（SmartScreen「未知发布者」可接受）。
+- G12 打包改 onedir + 去 UPX：`packaging/wallpace.spec` 加 `COLLECT`、`upx=False`，产物由单文件 `dist/wallpace.exe`（~48MB，每次解压到 temp）变为 `dist/wallpace/` 目录（启动快、杀软误报低）；分发按拍板为绿色版 zip，**不做代码签名与 Inno Setup 安装包**（SmartScreen「未知发布者」可接受）。`build.bat` 打包后自动把使用指南/故障排查以「使用说明.md / 故障排查.md」附进产物目录，发给朋友解压即用。
 
 ### 文档
 

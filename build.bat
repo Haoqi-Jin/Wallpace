@@ -40,12 +40,16 @@ REM 打包行为完全由 packaging\wallpace.spec 表达（--name/--windowed/one
 REM 都在 spec 内），命令行不再重复，避免"脚本与 spec 两处打包定义"长期漂移。
 REM G12 已切 onedir（spec 内改），本脚本无需改动。
 pyinstaller --clean --noconfirm "packaging\wallpace.spec"
-
 echo.
+REM [附赠] 使用说明随产物发出（发给朋友解压即用，不用翻仓库）
+copy /Y "docs\user-guide.md" "dist\wallpace\使用说明.md" >nul
+copy /Y "docs\troubleshooting.md" "dist\wallpace\故障排查.md" >nul
+echo 已附 使用说明.md / 故障排查.md 到 dist\wallpace\
+
 REM 产物路径兼容两种形态，双击即可用：
-REM   onefile（当前）      -> dist\wallpace.exe
-REM   onedir（B1 之后）   -> dist\wallpace\wallpace.exe
-REM 两者都认，并打印实际产物路径；否则 B1 改 onedir 后会误报"打包失败"。
+REM   onefile（旧版）      -> dist\wallpace.exe
+REM   onedir（G12 起现行）-> dist\wallpace\wallpace.exe
+REM 两者都认，并打印实际产物路径。
 setlocal EnableDelayedExpansion
 set "WALLPACE_EXE="
 if exist "dist\wallpace\wallpace.exe" set "WALLPACE_EXE=dist\wallpace\wallpace.exe"

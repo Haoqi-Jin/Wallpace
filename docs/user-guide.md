@@ -13,6 +13,7 @@ Wallpace 是 Windows 桌面小工具，**只支持 Windows 10/11**（壁纸设�
 启动方式任选其一：
 
 - **绿色版**：解压得到的是一个 `wallpace\` 目录（onedir 形态），进去双击 `wallpace\wallpace.exe` 即可。
+  目录内附 `使用说明.md`（即本文档）与 `故障排查.md`。
   建议把整个目录放到一个固定位置（如 `D:\tools\wallpace\`），别删；
   开机自启项指向的就是这个 exe 路径。
 - **源码运行**：`python src/main.py`（需 Python 3.13 + 依赖）。
