@@ -51,7 +51,7 @@
 | **G09** | **无壁纸填充方式设置**（填充/适应/拉伸/居中/平铺）：非标准比例图显示不全或有黑边 | `src/core/wallpaper_manager.py:64-69` 仅调 SPI，从不写 `WallpaperStyle` 注册表 | 所有用户；宽高比不匹配时观感差 | P1 | M | ✅ 已做（`WallpaperManager.apply_wallpaper_style()` 写 `WallpaperStyle` 注册表 + SPI 广播；`wallpaper_style` 配置键 + 校验；设置页下拉框 5 选项即改即生效；启动时按配置同步一次） |
 | **G11** | **无配置导入/导出、无"恢复默认"入口** | `src/core/settings.py:232` `reset_to_defaults()` 存在但**从未接 UI**（grep 仅此一处定义）；无 export/import | 换机/备份/重置需求的用户 | P1 | M | ✅ 已做（设置页「导出/导入配置」+「恢复默认」三按钮；导出为 `{version, config, image_library}` JSON；导入同步 settings 与图库状态并刷新监听；恢复默认带二次确认且不动磁盘图片文件） |
 | **G15** | **面向用户的文档缺失**：`docs/` 全是开发向（architecture/api-design/dev-standards/implementation-plan/review），无使用说明/FAQ/故障排查 | `ls docs/`；README 仅列开发向子文档 | 新用户无法自助 | P1 | M | ✅ 已做（`docs/user-guide.md` 使用指南 + `docs/troubleshooting.md` 故障排查/FAQ；README 目录树与「使用说明」段均加链接） |
-| **G12** | **打包为 UPX+onefile**：启动慢、杀软高频误报、SmartScreen 报"未知发布者" | `wallpace.spec:29` `upx=True`；`build.bat:39-44` `--onefile`；`dist/wallpace.exe` 47.9MB；无签名 | 新用户"不敢装" | P1 | M/L | 下批做（需拍板，见 §5） |
+| **G12** | **打包为 UPX+onefile**：启动慢、杀软高频误报、SmartScreen 报"未知发布者" | `wallpace.spec:29` `upx=True`；`build.bat:39-44` `--onefile`；`dist/wallpace.exe` 47.9MB；无签名 | 新用户"不敢装" | P1 | M/L | ✅ 已做（spec 改 onedir + 去 UPX：`packaging/wallpace.spec` 加 `COLLECT`、`upx=False`，产物 `dist/wallpace/`，build.bat 注释同步。**代码签名与 Inno Setup 按拍板不做**：分发范围=发给朋友/小圈子，SmartScreen「未知发布者」点「仍要运行」可接受，签名 ROI 为负） |
 
 ### P2 — 延后 / 按需
 
@@ -89,7 +89,7 @@
 | **批次 1（P0，本批）** | G01 单实例 · G03 首启不自启（默认改关或首启询问）· G04 配置损坏备份 + 友好提示 · G05 补 LICENSE/THIRD_PARTY_NOTICES + README 更正 · G02 启动时校验自启项有效性 + 卸载清理入口/文档 | **"装得上、用得放心、卸得干净"**（已全部完成 ✅） |
 | **批次 2（P1 一批）** | G06 日志轮转 · G07 诊断/打开日志入口 · G13 版本单一来源 · G14 README 修正 · G10 per_monitor_map 修复 · G23 图库空态 | **"出问题知道去哪看，配置/文档可信"**（已全部完成 ✅） |
 | **批次 3（P1 二批）** | G08 切换失败兜底重试 + 状态提示 · G09 壁纸填充方式 · G11 配置导入导出/恢复默认 · G15 用户文档/FAQ | **"更好用、可控、可迁移"**（本批已全部完成 ✅） |
-| **批次 4（发布工程，需拍板）** | G12 去 UPX / onedir 或安装包 / 代码签名 · G17 开始菜单快捷方式 | **"双击不报警、装得下"** |
+| **批次 4（发布工程，需拍板）** | G12 去 UPX / onedir 或安装包 / 代码签名 · G17 开始菜单快捷方式 | **"双击不报警、装得下"**（G12 已做 ✅：去 UPX + onedir 绿版；签名/安装包按拍板不做，G17 延后） |
 | **延后池** | G16 · G18 · G19 · G20 · G21 · G22 · G24 · G25 | 按用户反馈再启 |
 
 ---
@@ -98,13 +98,13 @@
 
 | # | 问题 | 影响哪些缺口 |
 |---|---|---|
-| Q1 | **分发范围**：仅自己用，还是要公开分发（GitHub Release/朋友）？ | 决定 G05/G12/G16/G17 的紧迫度 |
-| Q2 | 是否接受 Windows SmartScreen "未知发布者"提示？是否愿意为**代码签名**付费？ | G12 |
+| Q1 | **分发范围**：仅自己用，还是要公开分发（GitHub Release/朋友）？→ **已拍板：发给朋友/小圈子** | 决定 G05/G12/G16/G17 的紧迫度 |
+| Q2 | 是否接受 Windows SmartScreen "未知发布者"提示？是否愿意为**代码签名**付费？→ **已拍板：接受，不签名** | G12 |
 | Q3 | 是否需要**自动更新**（个人工具通常不需要）？ | G16 |
-| Q4 | 开机自启默认值：**改为默认关闭**，还是默认开但**首启弹窗询问**？ | G03 |
+| Q4 | 开机自启默认值：**改为默认关闭**，还是默认开但**首启弹窗询问**？ | G03（已做：默认关闭） |
 | Q5 | 配置/日志目录是否迁到 Windows 惯例的 `%APPDATA%\Wallpace`（当前 `~/.wallpace` 点号目录）？ | G04/G07 |
 | Q6 | 是否需要多语言 / 暗色主题？ | G18/G19 |
-| Q7 | 是否要做**安装包**（Inno Setup），还是只发绿色版？ | G12/G17 |
+| Q7 | 是否要做**安装包**（Inno Setup），还是只发绿色版？→ **已拍板：只发绿色版（zip）** | G12/G17 |
 
 ---
 

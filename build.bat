@@ -36,9 +36,9 @@ pyinstaller --version >nul 2>&1 || (
 )
 
 echo [3/3] 使用 PyInstaller 打包（spec = 打包行为唯一真源）...
-REM 打包行为完全由 packaging\wallpace.spec 表达（--name/--windowed/--onefile
+REM 打包行为完全由 packaging\wallpace.spec 表达（--name/--windowed/onedir 等
 REM 都在 spec 内），命令行不再重复，避免"脚本与 spec 两处打包定义"长期漂移。
-REM 下一批 B1 改 --onedir 时只改 spec，本脚本无需改动。
+REM G12 已切 onedir（spec 内改），本脚本无需改动。
 pyinstaller --clean --noconfirm "packaging\wallpace.spec"
 
 echo.

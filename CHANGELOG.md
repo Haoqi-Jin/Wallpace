@@ -20,6 +20,10 @@
 - G03 开机自启默认关闭（含 main.py 与设置页复选框兜底值同源修复）。
 - G05 补 MIT `LICENSE` 文件；README 更正 PySide6 为 LGPLv3。
 
+### 变更
+
+- G12 打包改 onedir + 去 UPX：`packaging/wallpace.spec` 加 `COLLECT`、`upx=False`，产物由单文件 `dist/wallpace.exe`（~48MB，每次解压到 temp）变为 `dist/wallpace/` 目录（启动快、杀软误报低）；分发按拍板为绿色版 zip，**不做代码签名与 Inno Setup 安装包**（SmartScreen「未知发布者」可接受）。
+
 ### 文档
 
 - G15 新增面向普通用户的文档：`docs/user-guide.md`（安装/首用/切换方式/填充方式/多屏/备份迁移/自启/卸载全流程）+ `docs/troubleshooting.md`（FAQ、如何看日志、「切换失败」气泡解释、配置损坏找回）；README 目录树与「使用说明」段均加链接。
