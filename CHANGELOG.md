@@ -7,6 +7,22 @@
 
 ## [未发布]
 
+### 新增
+
+- G07 诊断入口：设置页「打开日志目录（诊断）」按钮 + 托盘菜单项；`src/core/diagnostics.py` 提供 `LOGS_DIR` 单一真源，写日志与打开日志同一路径。
+- G02 卸载清理：设置页「卸载清理」按钮（二次确认 → 移除开机自启项 + 删除 `~/.wallpace`）；启动时自愈清理指向已删 exe 的坏自启项。
+- G06 日志轮转：`wallpace.log` 改 `RotatingFileHandler`（1MB × 3 备份封顶）。
+- G23 图库空态：图库页无图片时按当前筛选显示引导文案（全部→提示添加目录 / 收藏→提示 ☆ / 已跳过→提示恢复）。
+- G04 配置损坏时先备份 `config.json.corrupt-*` 再重置，并经 `show_platform_warning` 弹给用户（不再静默丢数据）。
+- G03 开机自启默认关闭（含 main.py 与设置页复选框兜底值同源修复）。
+- G05 补 MIT `LICENSE` 文件；README 更正 PySide6 为 LGPLv3。
+
+### 文档
+
+- G14 README 全面对齐代码：目录树补全、配置路径更正为 `~/.wallpace/config.json`、功能表扩至 20 项。
+- G13 版本号单一真源已于 0.2.0 完成，状态同步。
+- `docs/product-maturity-gap.md` 各缺口状态随实现逐条更新。
+
 ## [0.2.0] - 2026-10-03
 
 ### 修复
