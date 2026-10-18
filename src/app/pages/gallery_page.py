@@ -197,6 +197,15 @@ class GalleryPage(QWidget):
         self._scroll.setWidget(self._content)
         layout.addWidget(self._scroll, stretch=1)
 
+        # G23：图库空态引导。筛选后无图片时（首次未配目录 / 收藏/跳过为空）
+        # 显示提示文案，避免用户以为"程序坏了"；隐藏时占位高度为 0，
+        # 不影响正常网格布局。
+        self._empty_hint = QLabel()
+        self._empty_hint.setObjectName("empty_hint")
+        self._empty_hint.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self._empty_hint.setVisible(False)
+        layout.addWidget(self._empty_hint)
+
         # 滚动接近底部时追加下一批（懒加载）
         vbar = self._scroll.verticalScrollBar()
         vbar.valueChanged.connect(self._maybe_append_batch)
@@ -248,11 +257,35 @@ class GalleryPage(QWidget):
             return
         self._signature = signature
 
+        # G23：空态引导文案随当前筛选动态更新，切换筛选立即响应
+        self._update_empty_hint(len(paths))
+
         self._clear_grid()
 
         self._pending_paths = list(paths)
         self._rendered_count = 0
         self._append_batch()
+
+    def _update_empty_hint(self, count: int) -> None:
+        """G23：根据图片数量显隐空态引导文案。
+
+        文案按当前筛选变化：全部缺图片时提示添加目录；收藏/跳过为空时
+        提示操作说明，避免用户误以为程序坏了。
+        """
+        if count > 0:
+            self._empty_hint.setVisible(False)
+            self._empty_hint.setText("")
+            return
+        hints = {
+            "all": (
+                "还没有图片哦\n\n请前往「设置」页面添加图片文件夹，"
+                "程序会自动扫描 JPG / PNG / WebP / BMP / GIF"
+            ),
+            "favorites": "还没有收藏的图片\n\n点击缩略图旁的 ☆ 即可收藏",
+            "skipped": "还没有跳过的图片\n\n不满意当前壁纸可点「跳过」，此处可恢复",
+        }
+        self._empty_hint.setText(hints[self._filter])
+        self._empty_hint.setVisible(True)
 
     def _clear_grid(self) -> None:
         """清空网格：先从布局摘除 item，再退订 + deleteLater。

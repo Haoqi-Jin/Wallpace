@@ -241,3 +241,95 @@ class TestGalleryPageCleanup:
         for i in range(page.rendered_count):
             tile = page._grid.itemAt(i).widget()
             assert (tile._path, tile._on_image_ready) in calls
+
+
+class TestGalleryPageEmptyState:
+    """G23：图库空态引导文案。"""
+
+    def _show_page(self, page):
+        page.show()
+        from PySide6.QtCore import QCoreApplication
+        QCoreApplication.processEvents()
+
+    def test_empty_hint_visible_when_no_images(self, app):
+        from src.app.pages.gallery_page import GalleryPage
+
+        lib = _make_library([])
+        page = GalleryPage(
+            library=lib,
+            image_loader=None,
+            on_set_wallpaper=lambda p: None,
+            on_persist=lambda: None,
+        )
+        try:
+            self._show_page(page)
+            assert page._empty_hint.isVisible() is True
+        finally:
+            page.deleteLater()
+
+    def test_empty_hint_text_all_filter_when_no_images(self, app):
+        from src.app.pages.gallery_page import GalleryPage
+
+        lib = _make_library([])
+        page = GalleryPage(
+            library=lib,
+            image_loader=None,
+            on_set_wallpaper=lambda p: None,
+            on_persist=lambda: None,
+        )
+        try:
+            self._show_page(page)
+            text = page._empty_hint.text()
+            assert "还没有图片" in text or "添加图片文件夹" in text
+        finally:
+            page.deleteLater()
+
+    def test_empty_hint_hidden_when_images_exist(self, gallery):
+        page, _lib, _paths = gallery
+        self._show_page(page)
+        assert page._empty_hint.isVisible() is False
+
+    def test_empty_hint_updates_on_filter_change(self, app, tmp_path):
+        from src.app.pages.gallery_page import GalleryPage
+        from PySide6.QtCore import QCoreApplication
+
+        lib = _make_library([])
+        page = GalleryPage(
+            library=lib,
+            image_loader=None,
+            on_set_wallpaper=lambda p: None,
+            on_persist=lambda: None,
+        )
+        try:
+            self._show_page(page)
+            all_text = page._empty_hint.text()
+            page._set_filter("favorites")
+            page.refresh()
+            QCoreApplication.processEvents()
+            fav_text = page._empty_hint.text()
+            assert fav_text != all_text
+            assert "收藏" in fav_text or "☆" in fav_text
+            assert page._empty_hint.isVisible() is True
+        finally:
+            page.deleteLater()
+
+    def test_empty_hint_not_visible_after_adding_image(self, app, tmp_path):
+        from src.app.pages.gallery_page import GalleryPage
+        from PySide6.QtCore import QCoreApplication
+
+        lib = _make_library([])
+        page = GalleryPage(
+            library=lib,
+            image_loader=None,
+            on_set_wallpaper=lambda p: None,
+            on_persist=lambda: None,
+        )
+        try:
+            self._show_page(page)
+            assert page._empty_hint.isVisible() is True
+            lib._all_images = [str(tmp_path / "img.jpg")]
+            page.refresh()
+            QCoreApplication.processEvents()
+            assert page._empty_hint.isVisible() is False
+        finally:
+            page.deleteLater()
