@@ -203,6 +203,24 @@ class MainWindow(QMainWindow):
         except Exception:
             logger.exception("恢复主窗口到前台失败")
 
+    def notify_switch_failed(self, last_path: str) -> None:
+        """G08：壁纸切换彻底失败（候选全试过）时给用户兜底反馈。
+
+        走托盘气泡而非弹窗：窗口可能正最小化到托盘（无人值守场景），
+        弹窗会阻塞；气泡自动消失，不打断使用。接在 Scheduler 的
+        ``set_switch_failure_handler`` 上。
+        """
+        try:
+            tray = getattr(self, "_tray", None)
+            if tray is not None:
+                tray.showMessage(
+                    "Wallpace",
+                    f"壁纸切换失败（{Path(last_path).name}）。\n"
+                    "请检查图片是否损坏，或前往图库查看可用图片。",
+                )
+        except Exception:
+            logger.exception("显示切换失败提示失败（不影响主流程）")
+
     def _setup_ui(self) -> None:
         """构建所有 UI 组件。"""
         theme = ThemeManager()

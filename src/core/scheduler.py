@@ -63,6 +63,9 @@ class Scheduler:
         # PySide6 QTimer 实例
         self._timer: QTimer | None = None
         self._on_switch: Callable[[str], None] | None = None
+        # G08：切换**彻底失败**（候选耗尽仍失败）后的回调，用于 UI 层提示
+        # （托盘气泡 / 状态栏），避免用户"点了没反应"。仅失败路径调用。
+        self._on_switch_failed: Callable[[str], None] | None = None
         self._library: ImageLibrary | None = None
         self._wallpaper_manager: WallpaperManager | None = None
         # 可注入的壁纸设置器（#7 逐屏模式分流用）。None = 回落 WallpaperManager。
@@ -97,6 +100,20 @@ class Scheduler:
             func: 接收图片路径、返回是否成功的回调；``None`` 表示恢复默认实现。
         """
         self._wallpaper_applier = func
+
+    def set_switch_failure_handler(
+        self, func: Callable[[str], None] | None
+    ) -> None:
+        """注入"切换彻底失败"回调（G08，可选）。
+
+        仅当一次切换尝试中**所有候选图片**都设置失败时才调用，
+        参数为最终尝试的最后一张图片路径。用于 UI 层给用户兜底反馈
+        （托盘气泡），避免静默失败。``None`` 表示恢复默认（无反馈）。
+
+        Args:
+            func: 接收失败路径、返回值的回调；``None`` 表示关闭。
+        """
+        self._on_switch_failed = func
 
     def _apply_wallpaper(self, image_path: str) -> bool:
         """设置壁纸：优先用注入的 applier，否则回落 WallpaperManager。
@@ -163,18 +180,44 @@ class Scheduler:
             logger.error("调度器未注入 library/wallpaper_manager")
             return
 
-        image_path = self._library.get_random()
-        if image_path is None:
-            logger.warning("没有可用图片可切换")
-            return
-
-        success = self._apply_wallpaper(image_path)
-        if success:
-            logger.info("手动触发切换: %s", Path(image_path).name)
+        last_path = self._try_switch_with_fallback()
+        if last_path is not None:
+            logger.info("手动触发切换: %s", Path(last_path).name)
             if self._on_switch:
-                self._on_switch(image_path)
-        else:
-            logger.error("手动切换失败")
+                self._on_switch(last_path)
+
+    def _try_switch_with_fallback(self) -> str | None:
+        """G08：随机取一批候选图片依次尝试设置，任一成功即返回其路径。
+
+        单张图片失败（已删除/损坏/临时 SPI 失败）不再静默终止，
+        而是按候选顺序继续尝试；全部失败才回调 ``_on_switch_failed``
+        并返回 None。
+
+        每次取最多 3 张互不相同的候选（``ImageLibrary.get_random_candidates``），
+        不会死循环重试同一张坏图。
+
+        Returns:
+            成功设置的图片路径；全部候选失败 / 无可用图片返回 None。
+        """
+        if self._library is None:
+            return None
+        candidates = self._library.get_random_candidates(count=3)
+        if not candidates:
+            logger.warning("无可用的图片")
+            return None
+
+        for i, path in enumerate(candidates):
+            if i > 0:
+                logger.info("切换 %s 失败，尝试候选 %s",
+                            Path(candidates[i - 1]).name, Path(path).name)
+            if self._apply_wallpaper(path):
+                return path
+        last_path = candidates[-1]
+        logger.error("切换壁纸失败（%d 张候选均失败），最后一张: %s",
+                     len(candidates), last_path)
+        if self._on_switch_failed:
+            self._on_switch_failed(last_path)
+        return None
 
     def pause(self) -> None:
         if not self._is_running:
@@ -337,16 +380,11 @@ class Scheduler:
             logger.warning("library/wallpaper_manager 未就绪")
             return
 
-        image_path = self._library.get_random()
-        if image_path is None:
-            logger.warning("无可用的图片")
-            return
-
-        success = self._apply_wallpaper(image_path)
-        if success:
-            logger.info("每日自动切换: %s", Path(image_path).name)
+        success_path = self._try_switch_with_fallback()
+        if success_path is not None:
+            logger.info("每日自动切换: %s", Path(success_path).name)
             if self._on_switch:
-                self._on_switch(image_path)
+                self._on_switch(success_path)
 
         if self._is_running and not self._is_paused:
             self._start_daily_timer()
@@ -404,13 +442,8 @@ class Scheduler:
             logger.warning("library/wallpaper_manager 未就绪")
             return
 
-        image_path = self._library.get_random()
-        if image_path is None:
-            logger.warning("无可用的图片")
-            return
-
-        success = self._apply_wallpaper(image_path)
-        if success:
-            logger.info("间隔自动切换: %s", Path(image_path).name)
+        success_path = self._try_switch_with_fallback()
+        if success_path is not None:
+            logger.info("间隔自动切换: %s", Path(success_path).name)
             if self._on_switch:
-                self._on_switch(image_path)
+                self._on_switch(success_path)

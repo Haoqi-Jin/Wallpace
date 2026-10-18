@@ -84,6 +84,31 @@ class TestImageLibraryRandom:
         result = lib.get_random()
         assert result is None
 
+    # --- G08: get_random_candidates ---
+
+    def test_candidates_empty_when_no_images(self):
+        lib = ImageLibrary(directories=["/nonexistent"])
+        assert lib.get_random_candidates() == []
+
+    def test_candidates_distinct_and_within_available(self, sample_image_files):
+        lib = ImageLibrary(directories=[sample_image_files])
+        lib.scan()
+        total = len(lib.list_available())
+        candidates = lib.get_random_candidates(count=3)
+        assert len(candidates) == min(3, total)
+        # 互不相同（sample 保证）
+        assert len(set(candidates)) == len(candidates)
+        for c in candidates:
+            assert c in lib.list_available()
+
+    def test_candidates_respect_skip(self, sample_image_files):
+        lib = ImageLibrary(directories=[sample_image_files])
+        lib.scan()
+        first = lib.list_available()[0]
+        lib.skip(first)
+        for _ in range(20):  # 多试几次防随机巧合
+            assert first not in lib.get_random_candidates(count=3)
+
 
 class TestImageLibrarySkipFavorite:
     def test_skip_marks_image(self, sample_image_files):

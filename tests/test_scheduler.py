@@ -19,6 +19,11 @@ class FakeImageLibrary:
         self.get_random_count += 1
         return self._images[0] if self._images else None
 
+    def get_random_candidates(self, count: int = 3):
+        """G08：返回互不相同的候选（不足时取全部）。"""
+        import random
+        return random.sample(self._images, min(count, len(self._images)))
+
     def list_available(self):
         return self._images
 
@@ -331,3 +336,68 @@ class TestWallpaperApplierSeam:
         scheduler.set_wallpaper_applier(None)  # 清除
         scheduler.trigger_now()
         assert fake_wm.set_call_count == 1
+
+
+# ==================== G08 切换失败兜底 ====================
+
+
+class TestSwitchFailureFallback:
+    """G08：单张失败不静默终止，按候选顺序继续；全败才回调失败通知。"""
+
+    def test_all_candidates_fail_invokes_failure_handler(self, scheduler, fake_wm):
+        """applier 全返回 False → 候选都试到 → 失败回调被调（路径 = 最后候选）。"""
+        from src.core.scheduler import Scheduler
+
+        called = []
+        s = Scheduler(mode="manual")
+        lib = FakeImageLibrary(images=["a.jpg", "b.jpg", "c.jpg"])
+        s.set_dependencies(lib, fake_wm)
+        s.set_wallpaper_applier(lambda p: False)
+        s.set_switch_failure_handler(lambda p: called.append(p))
+        s.trigger_now()
+        assert called, "全败时未调失败回调"
+        # 最后候选在 sample(3) 中是第三个（3 张全取）
+        assert called[0] in ("a.jpg", "b.jpg", "c.jpg")
+
+    def test_success_within_candidates_no_failure_handler(self, scheduler, fake_wm):
+        """首张成功 → 不触发候选重试、不回调失败。"""
+        from src.core.scheduler import Scheduler
+
+        s = Scheduler(mode="manual")
+        lib = FakeImageLibrary(images=["a.jpg", "b.jpg"])
+        s.set_dependencies(lib, fake_wm)
+        s.set_wallpaper_applier(lambda p: p == "a.jpg")  # 仅 a 成功
+        called = []
+        s.set_switch_failure_handler(lambda p: called.append(p))
+        s.trigger_now()
+        assert called == []  # 只要任一候选成功就不算"彻底失败"
+
+    def test_failure_handler_default_none_does_not_crash(self, scheduler, fake_wm):
+        """未注入失败回调时全败也应安全（不抛异常）。"""
+        s = scheduler
+        s.set_wallpaper_applier(lambda p: False)
+        s.trigger_now()  # 不应抛
+
+    def test_no_candidates_no_failure_handler(self, scheduler, fake_wm):
+        """无可用图片 → 不调失败回调（是"没有图"不是"切换失败"）。"""
+        s = scheduler
+        s._library._images = []
+        s.set_wallpaper_applier(lambda p: True)
+        called = []
+        s.set_switch_failure_handler(lambda p: called.append(p))
+        s.trigger_now()
+        assert called == []
+        assert fake_wm.set_call_count == 0
+
+    def test_interval_switch_uses_fallback(self, fake_wm):
+        """_do_interval_switch 同样走候选兜底。"""
+        from src.core.scheduler import Scheduler
+
+        s = Scheduler(mode="interval_minutes", interval_minutes=5)
+        lib = FakeImageLibrary(images=["a.jpg", "b.jpg"])
+        s.set_dependencies(lib, fake_wm)
+        called = []
+        s.set_switch_failure_handler(lambda p: called.append(p))
+        s.set_wallpaper_applier(lambda p: False)
+        s._do_interval_switch()
+        assert called, "间隔切换全败未调失败回调"

@@ -749,6 +749,7 @@ class TestSchedulerWallpaperApplierWiring:
         main_window._settings.set("wallpaper_mode", "per_monitor")
         fake_lib = MagicMock()
         fake_lib.get_random.return_value = "D:/a.jpg"
+        fake_lib.get_random_candidates.return_value = ["a", "b"]
         fake_lib.list_available.return_value = ["a", "b"]
         main_window._library = fake_lib
         fake_wm = MagicMock()

@@ -260,6 +260,9 @@ def main() -> None:
             "「换一张」等切换操作将不会生效。"
         )
 
+    # G08：切换彻底失败（候选全试过）时托盘气泡兜底提示，避免静默"点了没反应"
+    scheduler.set_switch_failure_handler(window.notify_switch_failed)
+
     logger.info("Wallpace v%s 启动", __import__("src").__version__)
     logger.info(
         "配置: %d 个图片目录, %d 张扫描图片",

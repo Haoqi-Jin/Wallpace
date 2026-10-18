@@ -206,6 +206,23 @@ class ImageLibrary:
             return None
         return random.choice(available)
 
+    def get_random_candidates(self, count: int = 3) -> list[str]:
+        """随机取最多 count 张**互不相同**的候选图片（G08）。
+
+        供切换失败兜底使用：首选图片已删除/损坏时，按候选顺序依次尝试，
+        不需要重新随机碰运气。
+
+        Args:
+            count: 最多取几张候选；不足时取全部可用图片（仍打乱顺序）。
+
+        Returns:
+            候选路径列表（可用列表为空时返回 []）。
+        """
+        available = self.list_available()
+        if not available:
+            return []
+        return random.sample(available, min(count, len(available)))
+
     def add_directory(self, path: str, scan: bool = True) -> bool:
         """动态添加扫描目录。
 
