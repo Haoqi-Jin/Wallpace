@@ -20,6 +20,10 @@
 - G03 开机自启默认关闭（含 main.py 与设置页复选框兜底值同源修复）。
 - G05 补 MIT `LICENSE` 文件；README 更正 PySide6 为 LGPLv3。
 
+### 修复
+
+- 设置页内容高度（约 740px）超过主窗口默认内容区（约 530px）时，Qt 会把控件压到最小尺寸：间隔时间输入框文字被纵向裁掉、通用区控件挤在一起。改为用 `QScrollArea` 托管设置页内容（窗口不够高时滚动而非压缩控件），并给间隔输入框设置最小高度；补回归测试。
+
 ### 变更
 
 - G12 打包改 onedir + 去 UPX：`packaging/wallpace.spec` 加 `COLLECT`、`upx=False`，产物由单文件 `dist/wallpace.exe`（~48MB，每次解压到 temp）变为 `dist/wallpace/` 目录（启动快、杀软误报低）；分发按拍板为绿色版 zip，**不做代码签名与 Inno Setup 安装包**（SmartScreen「未知发布者」可接受）。`build.bat` 打包后自动把使用指南/故障排查以「使用说明.md / 故障排查.md」附进产物目录，发给朋友解压即用。
@@ -30,6 +34,7 @@
 - G14 README 全面对齐代码：目录树补全、配置路径更正为 `~/.wallpace/config.json`、功能表扩至 20 项。
 - G13 版本号单一真源已于 0.2.0 完成，状态同步。
 - `docs/product-maturity-gap.md` 各缺口状态随实现逐条更新。
+- `docs/troubleshooting.md` 新增「双击报 `Failed to load Python DLL ..._internal\python313.dll`」FAQ：说明 onedir 下单独复制 `wallpace.exe` 会缺 `_internal\` 依赖，给出快捷方式/整目录分发的解决办法；`docs/user-guide.md` 安装段同步加粗提示。
 
 ## [0.2.0] - 2026-10-03
 

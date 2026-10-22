@@ -50,6 +50,27 @@
 - 若你之前装过旧版后又删了 exe：重新运行一次，程序会**自动清理指向旧 exe 的坏自启项**（自愈），
   再勾选一次开机自启即可。
 
+### 双击报 `Failed to load Python DLL ...\_internal\python313.dll`
+
+完整报错通常是：
+
+```
+Failed to load Python DLL 'C:\Users\<你>\Desktop\_internal\python313.dll'.
+LoadLibrary: 找不到指定的模块。
+```
+
+**原因**：绿色版是 **onedir（目录形态）**。`wallpace.exe` 只是启动器，真正的依赖
+（Python DLL、Qt 等）都在同目录的 `_internal\` 文件夹里。只把 `wallpace.exe`
+一个文件复制到桌面 / 发给别人，它就找不到 `_internal\`，直接启动失败。
+
+**解决**：
+
+- 复制/分发时带上**整个 `wallpace\` 目录**（exe + `_internal\` + 附带文档），
+  双击目录里的 `wallpace.exe`。
+- 想要桌面入口：右键 `wallpace.exe` →「发送到 → 桌面快捷方式」，
+  **不要**直接把 exe 拖出来。
+- 目录移动过位置的话，去「设置 → 开机自启」取消再勾选一次（自启项存的是旧路径）。
+
 ### SmartScreen 提示「未知发布者」/ 杀软误报
 
 第一次双击解压后的 `wallpace\wallpace.exe`，Windows SmartScreen 可能弹「已保护你的电脑 / 未知发布者」：

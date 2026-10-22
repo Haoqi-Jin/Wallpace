@@ -16,6 +16,10 @@ Wallpace 是 Windows 桌面小工具，**只支持 Windows 10/11**（壁纸设�
   目录内附 `使用说明.md`（即本文档）与 `故障排查.md`。
   建议把整个目录放到一个固定位置（如 `D:\tools\wallpace\`），别删；
   开机自启项指向的就是这个 exe 路径。
+  > **不要把 `wallpace.exe` 单独复制出去**（桌面、U 盘、发给朋友都不行）：
+  > 依赖文件都在同目录的 `_internal\` 里，单独拿 exe 会报
+  > `Failed to load Python DLL ..._internal\python313.dll`。
+  > 需要桌面入口请右键 exe →「发送到 → 桌面快捷方式」；分发请压缩**整个目录**。
 - **源码运行**：`python src/main.py`（需 Python 3.13 + 依赖）。
 
 程序启动后会：

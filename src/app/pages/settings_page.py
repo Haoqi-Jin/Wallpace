@@ -9,6 +9,7 @@ AutostartManager 等模块的引用关系，既完成了「拆分 window.py」�
 import logging
 from collections.abc import Callable
 
+from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
     QCheckBox,
     QComboBox,
@@ -17,6 +18,7 @@ from PySide6.QtWidgets import (
     QLabel,
     QLineEdit,
     QPushButton,
+    QScrollArea,
     QVBoxLayout,
     QWidget,
 )
@@ -83,7 +85,25 @@ class SettingsPage(QWidget):
     # ==================== 构建 ====================
 
     def _build_ui(self) -> None:
-        layout = QVBoxLayout(self)
+        # 设置页内容自然高度约 740px，而主窗口默认 960x620（去掉顶栏/底栏后
+        # 内容区仅约 530px）。直接把内容塞进 QVBoxLayout 时 Qt 会把子控件压到
+        # 最小尺寸：间隔输入框的文字被纵向裁掉、通用区控件挤在一起。
+        # 用 QScrollArea 托管内容，窗口不够高时滚动而不是压缩控件。
+        outer = QVBoxLayout(self)
+        outer.setContentsMargins(0, 0, 0, 0)
+        outer.setSpacing(0)
+
+        scroll = QScrollArea(self)
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QFrame.Shape.NoFrame)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self._scroll = scroll
+
+        content = QWidget()
+        content.setObjectName("settings_content")
+        scroll.setWidget(content)
+
+        layout = QVBoxLayout(content)
         layout.setContentsMargins(24, 16, 24, 16)
 
         title = QLabel("设置")
@@ -176,6 +196,9 @@ class SettingsPage(QWidget):
         self._interval_input = QLineEdit()
         self._interval_input.setPlaceholderText("例如：30")
         self._interval_input.setMaximumWidth(100)
+        # QSS 给 QLineEdit 的上下 padding 共 16px，高度低于约 33px 时文字会被
+        # 纵向裁掉（曾出现输入「100」只露出一半）。锁住最小高度避免被压缩。
+        self._interval_input.setMinimumHeight(34)
         interval_layout.addWidget(interval_label)
 
         interval_input_row = QHBoxLayout()
@@ -299,6 +322,8 @@ class SettingsPage(QWidget):
 
         layout.addWidget(group_general)
         layout.addStretch()
+
+        outer.addWidget(scroll)
 
     # ==================== 纯 UI 辅助 ====================
 

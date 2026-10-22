@@ -13,7 +13,7 @@ from unittest.mock import MagicMock
 
 import pytest
 from PySide6.QtGui import QCloseEvent, QImage
-from PySide6.QtWidgets import QApplication
+from PySide6.QtWidgets import QApplication, QScrollArea
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 
@@ -211,6 +211,25 @@ class TestMainWindowSettings:
 
         assert removed is True
         assert main_window._library.directory_count == 0
+
+
+class TestSettingsPageLayout:
+    """设置页布局回归。
+
+    设置页自然高度（约 740px）超过主窗口默认内容区高度（约 530px）。
+    修复前 Qt 会把控件压到最小尺寸：间隔输入框文字被纵向裁掉、通用区
+    控件挤在一起。这两个断言锁住「用滚动区托管 + 输入框保底高度」。
+    """
+
+    def test_content_is_scrollable(self, main_window):
+        page = main_window._settings_page
+        assert isinstance(page._scroll, QScrollArea)
+        assert page._scroll.widgetResizable() is True
+
+    def test_interval_input_has_enough_height(self, main_window):
+        page = main_window._settings_page
+        # QSS 上下 padding 共 16px + 13px 字高，低于 33px 会裁字。
+        assert page._interval_input.minimumHeight() >= 33
 
 
 class TestMainWindowScheduler:
